@@ -37,6 +37,8 @@ try {
 } catch {
   /* storage unavailable */
 }
+// Filled in when the site is deployed (.github/workflows/pages.yml); left as it is locally.
+const VERSION = '__ETJM_VERSION__';
 const BUNDLE_URL = 'data/bundle.enc.json';
 const USERS_URL = 'data/users.json';
 const API = 'https://api.github.com';
@@ -87,6 +89,30 @@ export function toast(message, { tone = 'info', action, duration = 4500 } = {}) 
   const hide = () => box.classList.remove('show');
   toastTimer = setTimeout(hide, duration);
 }
+
+// If the website is updated while someone has it open, offer to reload it. The check runs
+// when they come back to the tab and every few minutes; nothing is lost on reload, because
+// timesheets are kept on this computer as they're typed.
+function watchForUpdates() {
+  if (VERSION.startsWith('__')) return;
+  let told = false;
+  const check = async () => {
+    if (told || document.hidden) return;
+    try {
+      const { version } = await (await fetch('version.json', { cache: 'no-store' })).json();
+      if (version && version !== VERSION) {
+        told = true;
+        toast('This website has been updated.', { action: { label: 'Reload', run: () => location.reload() }, duration: 60 * 60 * 1000 });
+      }
+    } catch {
+      /* offline, or an older deploy without version.json */
+    }
+  };
+  document.addEventListener('visibilitychange', check);
+  setInterval(check, 5 * 60 * 1000);
+  setTimeout(check, 20 * 1000);
+}
+watchForUpdates();
 
 // --------------------------------------------------------------------- text
 
