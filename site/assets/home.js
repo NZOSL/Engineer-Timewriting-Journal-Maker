@@ -17,11 +17,24 @@ function hasRows(data) {
   return Boolean(data?.jobs?.length || data?.other?.length);
 }
 
-// One entry per month: what's on this computer, merged with what's saved.
-function collect(saved) {
+// A copy on this computer that was saved, has no changes since, and is no longer in the
+// office's list was removed by the office (or the store was started again): forget it.
+// Recent saves are kept in case GitHub's search hasn't caught up yet.
+const STALE_MS = 15 * 60 * 1000;
+const removedByOffice = (record, savedMonths, month) => savedMonths && record?.meta?.savedAt && !record.meta.dirty
+  && !savedMonths.has(month) && Date.now() - Date.parse(record.meta.savedAt) > STALE_MS;
+
+// One entry per month: what's on this computer, merged with what's saved. `complete` means
+// `saved` is the office's full list (it was fetched without errors).
+function collect(saved, { complete = false } = {}) {
   const sheets = new Map();
+  const savedMonths = complete ? new Set(saved.map((item) => item.month)) : null;
   for (const month of drafts.months(session.username)) {
     const record = drafts.get(session.username, month);
+    if (removedByOffice(record, savedMonths, month)) {
+      drafts.remove(session.username, month);
+      continue;
+    }
     if (!record || (!hasRows(record.data) && !record.meta?.savedAt)) continue;
     sheets.set(month, { month, local: record });
   }
@@ -143,7 +156,7 @@ async function start() {
     return;
   }
   try {
-    state.sheets = collect(await listSaved(state.bundle, state.profile, session.username));
+    state.sheets = collect(await listSaved(state.bundle, state.profile, session.username), { complete: true });
   } catch (error) {
     state.loadError = error;
     notice('error', `${error.message} Showing the timesheets on this computer.`);

@@ -190,6 +190,9 @@ export const drafts = {
   set(username, month, record) {
     return store.set(this.key(username, month), record);
   },
+  remove(username, month) {
+    store.remove(this.key(username, month));
+  },
   // Signing out removes this person's copies that are already saved to the office;
   // copies with unsaved changes stay, so nothing is lost. Returns how many stayed.
   forgetSaved(username) {
