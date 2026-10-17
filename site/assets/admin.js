@@ -336,7 +336,7 @@ async function loadJournals() {
               f.name.replace(/^Engineer timewriting - /, '').replace(/ - [A-Za-z]+ \d{4}\.xlsx$/, ''))))) : null),
         el('td', { class: 'row-actions' },
           el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showJournal(e.currentTarget.closest('tr'), month, files) }, 'View'),
-          el('button', { class: 'btn btn-sm', type: 'button', title: closed ? 'Let engineers change this month again' : 'Freeze this month once its journal is uploaded', onclick: () => setClosed(month, !closed) }, closed ? 'Reopen' : 'Close')));
+          el('button', { class: 'btn btn-sm', type: 'button', title: closed ? 'Let engineers change this month again' : 'Freeze this month once its journal is uploaded', onclick: (e) => setClosed(month, !closed, e.currentTarget) }, closed ? 'Reopen' : 'Close')));
       return tr;
     });
     box.replaceChildren(el('table', { class: 'sheets journals' },
@@ -559,22 +559,40 @@ function renderStaff(message) {
   changed();
 }
 
-async function setClosed(month, close) {
-  if (state.busy) return;
+async function setClosed(month, close, button) {
+  if (state.busy) {
+    toast('Another change is still being saved. Try again in a minute.');
+    return;
+  }
   const label = monthInfo(month).label;
   const settings = structuredClone(state.settings);
   const months = new Set(settings.closedMonths || []);
   if (close) months.add(month); else months.delete(month);
   settings.closedMonths = [...months].sort();
-  notice('info', `${close ? 'Closing' : 'Reopening'} ${label}…`);
+  // It takes about a minute, so show it on the button and at the top of the page.
+  const was = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = close ? 'Closing…' : 'Reopening…';
+  }
+  const progress = (text) => {
+    notice('info', text);
+    $('#notices').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  progress(`${close ? 'Closing' : 'Reopening'} ${label}. This takes about a minute…`);
   try {
-    await saveSettings(settings, { message: `${close ? 'Close' : 'Reopen'} a month`, status: (text) => notice('info', text) });
+    await saveSettings(settings, { message: `${close ? 'Close' : 'Reopen'} a month`, status: (text) => progress(`${label}: ${text}`) });
     notice('info', close
       ? `${label} is closed: its journal is frozen and engineers can no longer change it.`
       : `${label} is open again: engineers can change it and its journal is rebuilt.`);
+    toast(close ? `${label} is closed.` : `${label} is open again.`, { tone: 'ok' });
     loadJournals();
   } catch (error) {
     notice('error', error.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = was;
+    }
   }
 }
 
