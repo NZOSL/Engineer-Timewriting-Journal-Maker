@@ -350,7 +350,8 @@ async function loadJournals() {
 // -------------------------------------------------------- engineers & rates
 
 // Save settings.json (and users.json for new passwords), then wait for the website to update.
-async function saveSettings(settings, { resetPasswords = [], message, status }) {
+// With wait: false it returns as soon as the change is saved, with the commit to watch.
+async function saveSettings(settings, { resetPasswords = [], message, status, wait = true }) {
   state.busy = true;
   try {
     let commit = null;
@@ -367,7 +368,7 @@ async function saveSettings(settings, { resetPasswords = [], message, status }) 
       state.settingsSha = saved.sha;
       commit = saved.commit;
     }
-    if (!commit) return true;
+    if (!commit || !wait) return commit;
     status('Saved. Updating the website and journals, about a minute…', 'busy');
     const run = await waitForPublish(commit);
     if (!run) throw new Error('This is taking longer than usual. Reload the page in a few minutes to check.');
@@ -569,30 +570,34 @@ async function setClosed(month, close, button) {
   const months = new Set(settings.closedMonths || []);
   if (close) months.add(month); else months.delete(month);
   settings.closedMonths = [...months].sort();
-  // It takes about a minute, so show it on the button and at the top of the page.
+  // Saving takes a second or two; the website and journals then update in the background
+  // (about half a minute), so the button doesn't wait for that.
   const was = button?.textContent;
   if (button) {
     button.disabled = true;
     button.textContent = close ? 'Closing…' : 'Reopening…';
   }
-  const progress = (text) => {
-    notice('info', text);
-    $('#notices').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  };
-  progress(`${close ? 'Closing' : 'Reopening'} ${label}. This takes about a minute…`);
+  let commit;
   try {
-    await saveSettings(settings, { message: `${close ? 'Close' : 'Reopen'} a month`, status: (text) => progress(`${label}: ${text}`) });
-    notice('info', close
-      ? `${label} is closed: its journal is frozen and engineers can no longer change it.`
-      : `${label} is open again: engineers can change it and its journal is rebuilt.`);
-    toast(close ? `${label} is closed.` : `${label} is open again.`, { tone: 'ok' });
-    loadJournals();
+    commit = await saveSettings(settings, { message: `${close ? 'Close' : 'Reopen'} a month`, status: () => {}, wait: false });
   } catch (error) {
     notice('error', error.message);
     if (button) {
       button.disabled = false;
       button.textContent = was;
     }
+    return;
+  }
+  toast(close
+    ? `${label} is closed: its journal is frozen and engineers can no longer change it.`
+    : `${label} is open again: engineers can change it, and its journal is rebuilt in about half a minute.`, { tone: 'ok', duration: 7000 });
+  await loadJournals();
+  if (!commit) return;
+  const run = await waitForPublish(commit).catch(() => null);
+  if (run && run.conclusion !== 'success') {
+    notice('error', `${label} was ${close ? 'closed' : 'reopened'}, but updating the website failed. Look at the “Update website and journals” run in the data repo’s Actions tab.`);
+  } else if (run && !close) {
+    loadJournals(); // show the rebuilt journal
   }
 }
 
