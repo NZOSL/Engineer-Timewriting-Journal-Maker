@@ -15,6 +15,7 @@ are handled in the clear is GitHub Actions in the private data repo.
 | Recharge rates, who works here, closed months | private `settings.json`, encrypted; each engineer's own rate in their encrypted profile | admins; each engineer sees only their own rate |
 | Passwords the office issues | private `users.json`, encrypted twice | admins (to hand them out) |
 | Passwords people choose themselves | **not stored anywhere** | nobody, not even admins |
+| Email addresses (for password resets) | private `settings.json`, encrypted; each person's own in their encrypted profile | admins; each person sees only their own |
 | Journals, engineer workbooks and the verified copy of each timesheet | private data repo, `output/` and `timesheets/`, encrypted, one file per month with a meaningless name | admins (Admin page) |
 
 **Every file in the private data repo is encrypted** (AES-256-GCM with a key derived from
@@ -41,9 +42,40 @@ so no earlier unencrypted version exists in their history.
 * **Timesheet keys** (random, one per person): encrypt their timesheets in the browser
   before they reach GitHub. The ciphertext is bound to the person and the month, so it
   can't be copied to someone else or to another month.
+* **Reset-link secret** (random, one per emailed link): opens only a copy of a *new* user
+  key made for that reset. See below.
 
 Every encrypted item uses AES-256-GCM with associated data naming what it is and whose
 it is. Issue titles carry a random-looking tag rather than a name.
+
+## Forgotten passwords
+
+**Forgot your password?** on the sign-in page sends a hash of the username to the office's
+*reset helper*, a small Google Apps Script (`relay/Code.gs`) running on the office's Google
+account. It checks the hash belongs to a real sign-in and opens a "Password reset request"
+issue in the data repo. The page shows the same answer whatever happens, so it can't be used
+to find out who has a sign-in or an email address.
+
+The Action then makes a **new** user key and timesheet key for that person, and emails them
+a link to `reset.html` through the helper. The link holds a random secret after the `#`, so
+it never reaches a web server, and the page removes it from the address bar at once. The
+secret opens only a copy of the new user key, published next to their sign-in, and a short
+profile with just enough to send a new password in. When they set one, it's sealed with the
+new key, so only someone with the link could have sent it. The new keys then replace the old
+ones, and the epoch moves on, which signs out anyone who had the old password.
+
+* The old password keeps working until the link is used, so asking for resets can't lock
+  anyone out.
+* A link works once, for an hour, and a newer link replaces it. The Action removes links
+  that have run out, at the latest within six hours (it runs every six hours for that).
+* At most one email per person every 15 minutes, and the helper takes at most 20 requests
+  a day in all.
+* The helper sends email only when asked by the Action, with a request signed with
+  `RELAY_SECRET` (HMAC-SHA256), recent, and not seen before. So nobody else can use it to
+  send email. The token it holds can only open issues in the data repo.
+* As with any reset by email, someone who can read a person's email can reset their
+  password. That's why only the office sets email addresses (on the Admin page), and each
+  person can check theirs on their **Settings** page.
 
 ## Attacks considered
 
@@ -93,7 +125,9 @@ Azure Function, and IT to register an app.
 * Turn on **two-factor authentication** for every GitHub account that can reach these
   repos, and require it for the NZOSL organisation (Settings → Authentication security).
 * Keep `MASTER_KEY` in a password manager as well. GitHub can't show a secret again, and
-  without it everyone needs a new password.
+  without it nothing in the data repo can be opened. To change it (for example if the only
+  copy is GitHub's), add a `NEW_MASTER_KEY` secret: the next run re-encrypts everything
+  with it and keeps everyone's password (see the data repo's README).
 * Give tokens only the permissions listed in the data repo's README, for that one repo.
 
 ## Reporting a problem

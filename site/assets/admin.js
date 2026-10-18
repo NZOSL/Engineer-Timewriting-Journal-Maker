@@ -7,7 +7,7 @@ import {
   $, el, toast, loadSession, clearSession, openSession, adminRepo, b64ToBytes, bytesToB64, journalTable, monthInfo,
   cleanText, nameProblem, nameKey, defaultUsername, issuedPassword,
 } from './app.js';
-import { setUpChangePassword } from './account.js';
+import { fireworks } from './fireworks.js';
 
 const session = loadSession();
 if (!session?.uk) location.replace('index.html?next=admin.html');
@@ -395,12 +395,17 @@ async function loadSettings() {
   renderStaff();
 }
 
+// The same rules as clean_email() in tools/etjm_core.py.
+const EMAIL_RE = /^[^@\s<>"',;:()[\]]+@[^@\s<>"',;:()[\]]+\.[^@\s<>"',;:()[\]]+$/;
+const cleanEmail = (value) => String(value || '').trim().toLowerCase();
+
 function renderStaff(message) {
   const box = $('#staff');
   const employees = (state.settings.employees || []).map((e) => ({ ...e, username: e.username || defaultUsername(e.name) }));
   const current = employees.filter((e) => e.active !== false);
   const former = employees.filter((e) => e.active === false);
-  const edits = { rates: new Map(), reset: new Set(), remove: new Set(), restore: new Set(), added: [] };
+  const admins = (state.settings.admins || []).map((a) => ({ ...a, username: a.username || defaultUsername(a.name) }));
+  const edits = { rates: new Map(), emails: new Map(), adminEmails: new Map(), reset: new Set(), remove: new Set(), restore: new Set(), added: [] };
   const status = el('div', { class: 'staff-status', role: 'status' });
   const saveButton = el('button', { class: 'btn btn-primary', type: 'button', disabled: true }, 'Save changes');
   const setStatus = (text, tone = 'muted') => {
@@ -408,7 +413,8 @@ function renderStaff(message) {
     status.replaceChildren(...[tone === 'busy' && el('span', { class: 'step-icon', 'aria-hidden': 'true' }), el('span', {}, text)].filter(Boolean));
   };
   const changed = () => {
-    saveButton.disabled = state.busy || !(edits.rates.size || edits.reset.size || edits.remove.size || edits.restore.size || edits.added.length);
+    saveButton.disabled = state.busy || !(edits.rates.size || edits.emails.size || edits.adminEmails.size || edits.reset.size
+      || edits.remove.size || edits.restore.size || edits.added.length);
   };
 
   const resetButton = (person) => el('button', { class: 'link-btn', type: 'button',
@@ -446,6 +452,19 @@ function renderStaff(message) {
       resetButton(person));
   };
 
+  // Where this person's password-reset emails go (see "Forgot your password?").
+  const emailInput = (person, map) => el('input', {
+    class: 'email-input', type: 'email', inputmode: 'email', autocomplete: 'off', spellcheck: false, maxLength: 254,
+    value: person.email || '', placeholder: 'name@company.co.nz', 'aria-label': `Email address for ${person.name}`,
+    oninput: (e) => {
+      const value = cleanEmail(e.currentTarget.value);
+      e.currentTarget.classList.toggle('invalid', Boolean(value) && !EMAIL_RE.test(value));
+      if (value === (person.email || '')) map.delete(person.username);
+      else map.set(person.username, value);
+      changed();
+    },
+  });
+
   const rateInput = (person) => el('input', {
     class: 'rate-input', type: 'number', min: '1', step: '0.01', inputmode: 'decimal', required: true,
     value: person.rechargeRate ?? '', 'aria-label': `Recharge rate for ${person.name}`,
@@ -460,6 +479,7 @@ function renderStaff(message) {
   const rows = current.map((person) => el('tr', { dataset: { username: person.username } },
     el('th', { scope: 'row' }, person.name),
     el('td', { class: 'muted' }, person.username),
+    el('td', {}, emailInput(person, edits.emails)),
     el('td', {}, el('span', { class: 'rate-prefix' }, '$'), rateInput(person)),
     passwordCell(person),
     el('td', { class: 'row-actions' }, el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => {
@@ -472,24 +492,28 @@ function renderStaff(message) {
 
   const addedBody = el('tbody', { class: 'added' });
   const newName = el('input', { class: 'add-input', placeholder: 'Full name, as in the journal', maxLength: 60, 'aria-label': 'New engineer’s name' });
+  const newEmail = el('input', { class: 'email-input', type: 'email', inputmode: 'email', autocomplete: 'off', spellcheck: false, maxLength: 254,
+    placeholder: 'Email (for password resets)', 'aria-label': 'New engineer’s email address' });
   const newRate = el('input', { class: 'rate-input', type: 'number', min: '1', step: '0.01', placeholder: '160', 'aria-label': 'New engineer’s recharge rate' });
   const addProblem = el('p', { class: 'form-message', hidden: true });
   const taken = () => new Set([...employees.map((e) => e.username), ...edits.added.map((e) => e.username)]);
   const add = () => {
     const name = cleanText(newName.value);
     const rate = Number(newRate.value);
+    const email = cleanEmail(newEmail.value);
     const problem = nameProblem(name)
       || (employees.concat(edits.added).some((e) => nameKey(e.name) === nameKey(name)) ? `${name} is already on the list.` : null)
+      || (email && !EMAIL_RE.test(email) ? 'That email address doesn’t look right.' : null)
       || (!(rate > 0) ? 'Enter their recharge rate, e.g. 160.' : null)
       || (!defaultUsername(name) || taken().has(defaultUsername(name)) ? 'Someone already has that username. Add them in settings.json with a different “username”.' : null);
     addProblem.hidden = !problem;
     addProblem.textContent = problem || '';
     if (problem) return;
-    const person = { name, username: defaultUsername(name), rechargeRate: rate };
+    const person = { name, username: defaultUsername(name), rechargeRate: rate, ...(email ? { email } : {}) };
     edits.added.push(person);
     addedBody.append(el('tr', { class: 'pending' },
       el('th', { scope: 'row' }, name, el('span', { class: 'chip chip-ok chip-inline' }, 'New')),
-      el('td', { class: 'muted' }, person.username), el('td', {}, `$${rate}`),
+      el('td', { class: 'muted' }, person.username), el('td', { class: 'muted' }, person.email || '—'), el('td', {}, `$${rate}`),
       el('td', { class: 'muted' }, 'Made when saved'),
       el('td', { class: 'row-actions' }, el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => {
         edits.added.splice(edits.added.indexOf(person), 1);
@@ -497,12 +521,24 @@ function renderStaff(message) {
         changed();
       } }, 'Undo'))));
     newName.value = '';
+    newEmail.value = '';
     newRate.value = '';
     newName.focus();
     changed();
   };
   newName.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
   newRate.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  newEmail.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+
+  // The people who can use this page. Their own reset emails are set here.
+  const officeTable = admins.length ? el('div', { class: 'office' },
+    el('h3', {}, 'Office'),
+    el('p', { class: 'muted' }, 'People who can use this Admin page. Add an email address so they can reset a forgotten password.'),
+    el('table', { class: 'sheets staff office-table' },
+      el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, 'Name'), el('th', { scope: 'col' }, 'Username'), el('th', { scope: 'col' }, 'Email'))),
+      el('tbody', {}, admins.map((person) => el('tr', {},
+        el('th', { scope: 'row' }, person.name), el('td', { class: 'muted' }, person.username),
+        el('td', {}, emailInput(person, edits.adminEmails))))))) : null;
 
   const formerList = former.length ? el('details', { class: 'former' },
     el('summary', {}, `Former engineers (${former.length})`),
@@ -521,6 +557,17 @@ function renderStaff(message) {
       setStatus('Every engineer needs a recharge rate above 0.', 'error');
       return;
     }
+    const badEmail = [...edits.emails, ...edits.adminEmails].find(([, value]) => value && !EMAIL_RE.test(value));
+    if (badEmail) {
+      setStatus(`The email address for ${badEmail[0]} doesn’t look right.`, 'error');
+      return;
+    }
+    const withEmail = (person, map, username) => {
+      if (!map.has(username)) return person;
+      const next = { ...person };
+      if (map.get(username)) next.email = map.get(username); else delete next.email;
+      return next;
+    };
     const settings = structuredClone(state.settings);
     settings.employees = (settings.employees || []).map((e) => {
       const username = e.username || defaultUsername(e.name);
@@ -528,8 +575,9 @@ function renderStaff(message) {
       if (edits.rates.has(username)) next.rechargeRate = Number(edits.rates.get(username));
       if (edits.remove.has(username)) next.active = false;
       if (edits.restore.has(username)) delete next.active;
-      return next;
+      return withEmail(next, edits.emails, username);
     }).concat(edits.added);
+    settings.admins = (settings.admins || []).map((a) => withEmail(a, edits.adminEmails, a.username || defaultUsername(a.name)));
     delete settings.defaultRechargeRate;
     saveButton.disabled = true;
     setStatus('Saving…', 'busy');
@@ -545,17 +593,21 @@ function renderStaff(message) {
     }
   });
 
-  box.replaceChildren(
+  // (replaceChildren would show a missing part as the word "null", so leave those out.)
+  box.replaceChildren(...[
     el('table', { class: 'sheets staff' },
       el('thead', {}, el('tr', {},
-        el('th', { scope: 'col' }, 'Name'), el('th', { scope: 'col' }, 'Username'), el('th', { scope: 'col' }, 'Rate / hour'),
+        el('th', { scope: 'col' }, 'Name'), el('th', { scope: 'col' }, 'Username'), el('th', { scope: 'col' }, 'Email'),
+        el('th', { scope: 'col' }, 'Rate / hour'),
         el('th', { scope: 'col' }, 'Password'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Actions')))),
       el('tbody', {}, rows), addedBody),
-    el('div', { class: 'add-row' }, newName, el('span', { class: 'rate-prefix' }, '$'), newRate,
+    el('div', { class: 'add-row' }, newName, newEmail, el('span', { class: 'rate-prefix' }, '$'), newRate,
       el('button', { class: 'btn', type: 'button', onclick: add }, 'Add engineer')),
     addProblem,
     formerList,
-    el('div', { class: 'staff-actions' }, saveButton, status));
+    officeTable,
+    el('div', { class: 'staff-actions' }, saveButton, status),
+  ].filter(Boolean));
   if (message) setStatus(message, 'ok');
   changed();
 }
@@ -588,6 +640,7 @@ async function setClosed(month, close, button) {
     }
     return;
   }
+  if (close) fireworks();
   toast(close
     ? `${label} is closed: its journal is frozen and engineers can no longer change it.`
     : `${label} is open again: engineers can change it, and its journal is rebuilt in about half a minute.`, { tone: 'ok', duration: 7000 });
@@ -608,7 +661,6 @@ async function start() {
     const opened = await openSession(session);
     state.bundle = opened.bundle;
     state.profile = opened.profile;
-    setUpChangePassword(() => ({ bundle: state.bundle, profile: state.profile, session }));
   } catch (error) {
     if (error.code === 'signin') {
       clearSession();

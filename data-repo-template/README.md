@@ -20,7 +20,8 @@ website's **Admin page** to work with them. How it's all protected is in the web
 | Let someone use the Admin page | Add them to `admins` in `settings.json` (see *Changing files by hand* below). They get a password like everyone else. Someone in both lists gets both pages. |
 | Add an engineer | On the **Admin** page, under **Engineers**, type their name and recharge rate, press **Add engineer**, then **Save changes**. About a minute later their password is in the list (**Show** or **Copy** it to hand over). Their username is `firstname.lastname`. |
 | Give someone a new password | On the **Admin** page, press **New password** next to them, then **Save changes**. This also signs them out everywhere, so use it if a password may have got out. Their new password appears in the list a minute later. |
-| Let people choose their own password | Anyone can use **Change password** on the website. The office never sees it; the Admin page then shows *Chosen by them*. |
+| Let people choose their own password | Anyone can use **Settings** → **Change your password** on the website. The office never sees it; the Admin page then shows *Chosen by them*. |
+| Let people reset a forgotten password | Add their email address on the **Admin** page (Engineers, or Office for admins), then **Save changes**. **Forgot your password?** on the sign-in page then emails them a link. It needs the reset helper (see *Secrets and variables* below). |
 | Remove an engineer | On the **Admin** page, press **Remove** next to them, then **Save changes**. They can't sign in any more, but stay listed under *Former engineers* (and in `settings.json` with `"active": false`) so their past journals keep their rate. **Restore** brings them back. |
 | Change a recharge rate | On the **Admin** page, change the number next to them, then **Save changes**. Every month that isn't closed is rebuilt with the new rate. |
 | Close a month after uploading its journal | On the **Admin** page, under **Journals**, press **Close**. The month's files are frozen: engineers can't change it and rate changes don't affect it. **Reopen** undoes it. |
@@ -59,7 +60,7 @@ git commit -am "Update settings" && git push && rm /tmp/settings.json
 
 ## How it works
 
-1. One Action, **Update website and journals** (`.github/workflows/update.yml`), runs when `input/`, `settings.json` or `users.json` changes, and after every save or password change on the website. Its logs and commit messages name nobody.
+1. One Action, **Update website and journals** (`.github/workflows/update.yml`), runs when `input/`, `settings.json` or `users.json` changes, after every save, password change or reset request on the website, and every six hours (to remove reset links that have run out). Its logs and commit messages name nobody.
 2. **Sign-ins and job list.** It gives everyone in `settings.json` a sign-in in `users.json`; all its secrets are encrypted with keys derived from `MASTER_KEY`. It applies resets and password changes, and removes leavers. Then it publishes the encrypted sign-ins and the job list to the website. The job list keeps only jobs whose status is in `jobStatuses` (normally `Open`): job number, description, location, owner and CAPEX/REVEX. Costs, consultants, people and rates never leave this repo.
 3. **Saving.** An engineer signs in, fills in the calendar and presses **Save**. Their browser encrypts the month with their own timesheet key and stores it as an issue here. The issue is titled `Timesheet 2026-09 · <random tag>`, so it names nobody, and only that engineer and the Action can read it.
 4. **Journals.** The same Action opens each timesheet issue with its owner's key, and ignores anything that doesn't open or is older than the last verified copy in `timesheets/`. It then rewrites `output/`, encrypted:
@@ -71,9 +72,9 @@ git commit -am "Update settings" && git push && rm /tmp/settings.json
 
 | Setting | Meaning |
 | --- | --- |
-| `employees` | Engineers who fill in timesheets: `name` (as it should appear in the journal), `rechargeRate` (each engineer has their own; there's no default), optional `username` (default `firstname.lastname`), and `"active": false` for people who have left. They can't sign in, but their past journals keep their rate. |
+| `employees` | Engineers who fill in timesheets: `name` (as it should appear in the journal), `rechargeRate` (each engineer has their own; there's no default), optional `username` (default `firstname.lastname`), optional `email` (where password-reset links go), and `"active": false` for people who have left. They can't sign in, but their past journals keep their rate. |
 | `closedMonths` | Months whose journals have been uploaded to Business Central, like `"2026-09"`. Their files are frozen: engineers can't change those months, and later rate changes don't affect them. |
-| `admins` | People who can use the Admin page (upload the report, download journals): `name`, optional `username`. |
+| `admins` | People who can use the Admin page (upload the report, download journals): `name`, optional `username`, optional `email`. |
 | `otherTime` | The non-job rows engineers can add, like General Time and the leave types. They go in the engineer workbooks, not the journal. |
 | `jobStatuses` | Which job task statuses appear on the website. |
 | `journal.balancingGlAccount` | GL account for each engineer's balancing line. |
@@ -82,7 +83,7 @@ git commit -am "Update settings" && git push && rm /tmp/settings.json
 | `journal.dateFormat` | Date format in the CSV (`%d/%m/%Y` gives 30/09/2026). |
 | `journal.csvUtf8Bom` | Start the CSV with a byte-order mark so Excel reads names with macrons correctly. |
 
-## Secrets (Settings → Secrets and variables → Actions)
+## Secrets and variables (Settings → Secrets and variables → Actions)
 
 | Secret | What it is | How to change it |
 | --- | --- | --- |
@@ -90,5 +91,21 @@ git commit -am "Update settings" && git push && rm /tmp/settings.json
 | `SAVE_TOKEN` | A fine-grained GitHub token with **Issues: read and write** on this repo only. The website uses it to save timesheets and send password changes. | Create a new token, update the secret, then run **Update website and journals** (Actions → Run workflow). Do this if someone leaves on bad terms. |
 | `ADMIN_TOKEN` | A fine-grained GitHub token with **Contents: read and write** and **Actions: read** on this repo only. Only admins' sign-ins can unlock it. The Admin page uses it to upload reports, manage engineers and download journals. | Create a new token, update the secret, then run **Update website and journals**. |
 | `SITE_DEPLOY_KEY` | Lets this repo update the encrypted job list in the website repo (deploy key with write access there). | Rarely needed. Generate a new key pair and replace both halves. |
+| `RELAY_SECRET` | Shared with the reset helper (the Google Apps Script in the website repo's `relay/`), to sign the reset emails it sends. | Delete it from the script's properties and run `setup` there again, then paste the new one here. |
+| `RELAY_URL` (a **variable**, not a secret) | The reset helper's web address, ending `/exec`. While it's set, the sign-in page offers **Forgot your password?** | Delete it to turn reset emails off. |
+| `NEW_MASTER_KEY` (only while changing `MASTER_KEY`) | See *Changing MASTER_KEY* below. | Delete it once `MASTER_KEY` has the same value. |
+
+## Changing MASTER_KEY
+
+Do this if the key might have got out, or if nobody has a copy of it apart from GitHub (which can't show it).
+Everyone keeps their password, and nobody notices.
+
+1. Make a new key and copy it, without it ever being shown: in Terminal on a Mac, run
+   `openssl rand -base64 32 | tr -d '\n' | pbcopy`.
+2. Paste it into your password manager (as "Engineer Timewriting MASTER_KEY").
+3. Here, add a secret named `NEW_MASTER_KEY` and paste the same key.
+4. **Actions** → **Update website and journals** → **Run workflow**. Its first step re-encrypts
+   everything with the new key, and renames the timesheet issues to match.
+5. When it has finished, edit `MASTER_KEY` and paste the new key again, then delete `NEW_MASTER_KEY`.
 
 Anyone who can sign in can, with some effort, get the save token. That lets them see the timesheet issues, but each one is encrypted for its owner. They can't read them, and changes they make are ignored. The save token can't reach anything else here. The admin token can, so only admins can unlock it — and even with it, the files here are encrypted.

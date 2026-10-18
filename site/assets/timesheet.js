@@ -7,7 +7,7 @@ import {
   fmtDateTime, drafts, loadSession, openSession, loadSaved, listSaved, saveToGitHub, clearSession,
   journalLines, journalCells, journalTable,
 } from './app.js';
-import { setUpChangePassword } from './account.js';
+import { fireworks } from './fireworks.js';
 
 const session = loadSession();
 if (!session?.uk) location.replace(`index.html?next=${encodeURIComponent(`timesheet.html${location.search}`)}`);
@@ -755,6 +755,7 @@ async function save() {
     persistLocal();
     setNotice('newer-local', null);
     toast('Saved. The journal and workbooks update in about a minute.', { tone: 'ok' });
+    fireworks();
   } catch (error) {
     toast(error.message || 'Saving didn’t work. Your hours are still on this computer.', { tone: 'error', duration: 9000 });
   } finally {
@@ -872,7 +873,6 @@ async function start() {
     }
     state.bundle = opened.bundle;
     state.profile = opened.profile;
-    setUpChangePassword(() => ({ bundle: state.bundle, profile: state.profile, session }));
     session.name = opened.profile.name;
     $('#user-name').textContent = opened.profile.name;
   } catch (error) {

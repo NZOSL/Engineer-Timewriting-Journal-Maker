@@ -189,6 +189,8 @@ button, input, select { font: inherit; color: inherit; }
 .name-check p { margin: 0 0 10px; }
 .name-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .signin-foot { margin: 0; text-align: center; font-size: 13px; }
+.signin a:not(.btn) { color: var(--accent); }
+.signin a:not(.btn):hover { color: var(--accent-hover); }
 
 /* --------------------------------------------------------------- app page */
 
@@ -679,20 +681,54 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .peek-btn:hover { background: var(--hover); color: var(--text); }
 .peek-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .peek-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.peek-btn[aria-pressed="false"] .slash { display: none; }
+.peek-btn { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.peek-btn .slash { display: none; }
+.peek-btn.showing { background: var(--accent-weak); color: var(--accent); }
+.peek-btn.showing .slash { display: inline; }
 .field .password-wrap input { box-sizing: border-box; }
 .link-all { font-weight: 650; border-bottom: 1px solid var(--line); border-radius: 6px 6px 0 0; }
 
 html.framed body { display: none !important; }
-.dialog-small { width: min(460px, calc(100vw - 32px)); }
-.cp-form { display: grid; gap: 14px; }
-.cp-form .field input { height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); }
-.cp-form .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
-.cp-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* ------------------------------------------------- settings, forgot and reset */
+
+.settings { max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; display: grid; gap: 16px; }
+.settings > * { min-width: 0; }
+.page-title { margin: 4px 0 0; font-size: 24px; letter-spacing: -0.01em; }
+.settings-card { padding: 20px 24px 24px; display: grid; gap: 14px; }
+.settings-card h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.settings-card p { margin: 0; }
+.facts { margin: 0; display: grid; gap: 8px; }
+.facts div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.settings-form { display: grid; gap: 14px; max-width: 440px; }
+.settings-form .btn { justify-self: start; }
+.form-ok { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--ok-bg); color: var(--ok); }
+.signin-alt { margin: 0; text-align: center; font-size: 13.5px; }
+.plain-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+#status-actions { display: grid; gap: 8px; }
+#status-actions:empty { display: none; }
+
+/* -------------------------------------------------------- admin: emails */
+
+#staff { overflow-x: auto; }
+.staff th, .staff td { padding-left: 12px; padding-right: 12px; }
+.email-input { width: 210px; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
+.email-input.invalid { border-color: var(--danger); }
+.add-row .email-input { height: 34px; border-radius: 8px; }
+.office { margin-top: 22px; }
+.office h3 { margin: 0 0 4px; font-size: 15px; }
+.office > p { margin: 0 0 8px; }
+
+/* ------------------------------------------------------------- fireworks */
+
+.fireworks { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; }
 
 /* ----------------------------------------------------------- small screens */
 
 @media (max-width: 760px) {
+  .facts div { grid-template-columns: 1fr; gap: 2px; }
+  .settings-card { padding: 18px 16px 20px; }
   :root { --w-label: 150px; --w-type: 68px; --w-total: 48px; --w-day: 42px; }
   .topbar { grid-template-columns: auto 1fr auto; height: 56px; padding: 0 8px; gap: 4px; }
   .brand span { display: none; }

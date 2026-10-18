@@ -603,8 +603,8 @@ class SettingsTests(unittest.TestCase):
             path = Path(tmp) / "settings.json"
             path.write_text(json.dumps({"employees": [{"name": "Ann Example"}], "admins": [{"name": "Dee Office"}, {"name": "Ann Example"}]}))
             everyone = {p["username"]: p for p in people(load_settings(path))}
-            self.assertEqual(everyone["ann.example"], {"name": "Ann Example", "username": "ann.example", "timesheets": True, "admin": True})
-            self.assertEqual(everyone["dee.office"], {"name": "Dee Office", "username": "dee.office", "timesheets": False, "admin": True})
+            self.assertEqual(everyone["ann.example"], {"name": "Ann Example", "username": "ann.example", "timesheets": True, "admin": True, "email": None})
+            self.assertEqual(everyone["dee.office"], {"name": "Dee Office", "username": "dee.office", "timesheets": False, "admin": True, "email": None})
             path.write_text(json.dumps({"employees": [{"name": "Ann Example"}], "admins": [{"name": "Someone Else", "username": "ann.example"}]}))
             with self.assertRaises(ValueError):
                 load_settings(path)

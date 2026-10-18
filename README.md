@@ -33,16 +33,17 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 
 ## Using the website
 
-1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Reuse** one to start another month with the same jobs and other-time rows.
+1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Reuse** one to start another month with the same jobs and other-time rows. Hold the eye next to the password box to see what you've typed. Forgot it? **Forgot your password?** emails you a link to choose a new one (if the office has your email address).
 2. Type a job number (`9683`, `J9683` or `JOB009683`) in **Add a job**. Location, owner and description fill in from the job list and can be edited. The job gets a CAPEX line, a REVEX line or both, depending on which tasks are open in Business Central.
 3. Type hours into the days. Blank means 0. `7.5`, `7,5` and `7:30` all work. Arrow keys and Enter move between cells, and you can paste a block straight from Excel.
 4. Add leave, general time and other non-job rows under **Other time**. These are recorded in your engineer workbook, not the journal.
 5. Press **Save** (or Ctrl+S). **Journal preview** shows your lines exactly as they'll appear in the journal: all twelve columns, the yellow ones from your timesheet, and the balancing line.
+6. **Settings** (top right) shows your account, lets you change your password to one only you know, and shows where password-reset emails go.
 
 **Admins** (listed under `admins` in the data repo's settings) sign in to the **Admin** page, where they can:
 - upload a new *Job Task Overview* report, which is checked, saved in the private repo and published to the website within a minute or two;
-- add and remove engineers, set each engineer's recharge rate (there's no default rate), and see, copy or reset passwords;
-- view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it.
+- add and remove engineers, set each engineer's recharge rate (there's no default rate) and email address (for password resets), and see, copy or reset passwords;
+- view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save).
 
 Engineers can copy their jobs and other-time rows from any month they've saved (**Copy rows from…** on the timesheet, or **Reuse** on My timesheets). Closed months are read-only.
 
@@ -54,6 +55,7 @@ Engineers can copy their jobs and other-time rows from any month they've saved (
 | `tools/` | Python used by the data repo's Actions: reading the BC report, encrypting the job list, building the journal and workbooks. `etjm_vault.py` lets someone with `MASTER_KEY` look at or change the data repo's encrypted files by hand. |
 | `tests/` | Unit tests (`python -m unittest discover -s tests`) using made-up data. |
 | `data-repo-template/` | Workflows, settings and README for the private data repo. |
+| `relay/` | The reset helper: a Google Apps Script the office runs, which takes "Forgot your password?" requests and sends the reset emails. See [relay/README.md](relay/README.md). |
 
 ## Setting it up from scratch
 
@@ -66,6 +68,7 @@ Engineers can copy their jobs and other-time rows from any month they've saved (
 4. Create a fine-grained personal access token (Repository access: only the data repo; Permissions: **Issues → Read and write**) and add it to the data repo as `SAVE_TOKEN`. Create a second one with **Contents → Read and write** and **Actions → Read**, for the Admin page, and add it as `ADMIN_TOKEN`.
 5. In this repo, set **Settings → Pages → Source** to *GitHub Actions*.
 6. Run **Update website and journals** in the data repo.
+7. Optional, for **Forgot your password?**: set up the reset helper as in [relay/README.md](relay/README.md), and add email addresses on the Admin page.
 
 ## Local development
 

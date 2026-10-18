@@ -230,6 +230,7 @@ def _check_settings(settings: dict) -> None:
         if not isinstance(emp.get("active", True), bool):
             raise ValueError(f"settings.json: active for {emp['name']} must be true or false.")
         emp["active"] = emp.get("active", True)
+        _set_email(emp)
     admins = settings.get("admins")
     if not isinstance(admins, list):
         raise ValueError("settings.json: admins must be a list.")
@@ -245,6 +246,7 @@ def _check_settings(settings: dict) -> None:
         if same and name_key(same["name"]) != name_key(admin["name"]):
             raise ValueError(f"settings.json: the username {username} is used by two different people.")
         admin["username"] = username
+        _set_email(admin)
     closed = settings.get("closedMonths")
     if not isinstance(closed, list) or not all(isinstance(m, str) and MONTH_RE.match(m) for m in closed):
         raise ValueError('settings.json: closedMonths must be a list of months like "2026-09".')
@@ -259,6 +261,29 @@ def _check_settings(settings: dict) -> None:
     labels = settings["journal"].get("monthLabels")
     if not isinstance(labels, list) or len(labels) != 12:
         raise ValueError("settings.json: journal.monthLabels must list 12 month labels.")
+
+
+EMAIL_RE = re.compile(r"^[^@\s<>\"',;:()\[\]]+@[^@\s<>\"',;:()\[\]]+\.[^@\s<>\"',;:()\[\]]+$")
+
+
+def clean_email(value, who: str = "someone") -> str | None:
+    """Someone's email address for password resets, tidied up (None if there isn't one)."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"settings.json: the email for {who} must be text.")
+    email = value.strip().lower()
+    if len(email) > 254 or not EMAIL_RE.match(email):
+        raise ValueError(f"settings.json: the email for {who} doesn't look like an email address.")
+    return email
+
+
+def _set_email(person: dict) -> None:
+    email = clean_email(person.get("email"), person["name"])
+    if email:
+        person["email"] = email
+    else:
+        person.pop("email", None)
 
 
 def _is_rate(value) -> bool:
@@ -276,11 +301,13 @@ def people(settings: dict) -> list[dict]:
     for emp in settings["employees"]:
         if not emp.get("active", True):
             continue
-        result[emp["username"]] = {"name": emp["name"], "username": emp["username"], "timesheets": True, "admin": False}
+        result[emp["username"]] = {"name": emp["name"], "username": emp["username"], "timesheets": True, "admin": False,
+                                   "email": emp.get("email")}
     for admin in settings.get("admins", []):
         person = result.setdefault(admin["username"], {
-            "name": admin["name"], "username": admin["username"], "timesheets": False, "admin": False})
+            "name": admin["name"], "username": admin["username"], "timesheets": False, "admin": False, "email": None})
         person["admin"] = True
+        person["email"] = person["email"] or admin.get("email")
     return list(result.values())
 
 
@@ -398,6 +425,11 @@ def state_key(master: bytes) -> bytes:
     return derive(master, "etjm/state")
 
 
+def recover_key(secret: bytes) -> bytes:
+    """Opens a password-reset link's copy of someone's new user key (see etjm_accounts.py)."""
+    return derive(secret, "etjm/recover")
+
+
 def store_key(master: bytes) -> bytes:
     """Encrypts every file in the private data repo (see etjm_vault.py)."""
     return derive(master, "etjm/store")
@@ -477,6 +509,8 @@ def decrypt_bundle(blob: dict, key: bytes) -> dict:
 # Timesheets travel as GitHub issues, encrypted with the engineer's newest data key.
 TIMESHEET_V2 = "<!-- etjm:timesheet:v2 -->"
 PASSWORD_V1 = "<!-- etjm:password:v1 -->"
+RESET_REQUEST_V1 = "<!-- etjm:reset-request:v1 -->"
+RESET_TITLE = "Password reset request"
 CIPHER_BLOCK_RE = re.compile(r"```etjm[ \t]*\r?\n([A-Za-z0-9_.\-]+)\r?\n```")
 TITLE_RE = re.compile(r"^Timesheet (\d{4}-\d{2}) · ([0-9a-f]{16})$")
 PASSWORD_TITLE_RE = re.compile(r"^Password change · ([0-9a-f]{16})$")

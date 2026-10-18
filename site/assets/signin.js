@@ -2,7 +2,7 @@
 // The password unlocks the encrypted job list in this browser.
 
 import {
-  $, signIn, saveSession, loadSession, clearSession, lastName, normalizeUsername, homeFor, SIGN_IN_AGAIN, drafts, toast,
+  $, signIn, saveSession, loadSession, clearSession, lastName, normalizeUsername, homeFor, SIGN_IN_AGAIN, drafts, toast, holdToShow,
 } from './app.js';
 
 const params = new URLSearchParams(location.search);
@@ -25,18 +25,8 @@ userInput.value = lastName.get();
 if (Object.hasOwn(SIGN_IN_AGAIN, params.get('why') || '')) showMessage(SIGN_IN_AGAIN[params.get('why')]);
 (userInput.value ? passwordInput : userInput).focus();
 
-// The eye button shows what's been typed in the password box, and hides it again.
-const peek = $('#peek');
-function setPeek(show) {
-  passwordInput.type = show ? 'text' : 'password';
-  peek.setAttribute('aria-pressed', String(show));
-  peek.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
-  peek.title = show ? 'Hide password' : 'Show password';
-}
-peek.addEventListener('click', () => {
-  setPeek(passwordInput.type === 'password');
-  passwordInput.focus();
-});
+// Holding the eye down shows what's been typed in the password box; letting go hides it.
+const hidePassword = holdToShow($('#peek'), [passwordInput]);
 
 // Going Back to this page restores it as it was left (button disabled, "Signing in…").
 // Reset it so whoever is at the computer can sign in again, as themselves or someone else.
@@ -45,7 +35,7 @@ window.addEventListener('pageshow', (event) => {
   button.disabled = false;
   button.textContent = 'Sign in';
   passwordInput.value = '';
-  setPeek(false);
+  hidePassword();
   message.hidden = true;
 });
 
@@ -66,7 +56,7 @@ form.addEventListener('submit', async (event) => {
   try {
     const { session, profile } = await signIn(username, passwordInput.value);
     lastName.set(session.username);
-    setPeek(false);
+    hidePassword();
     saveSession({ ...session, remember: $('#remember').checked });
     location.href = next || homeFor(profile);
   } catch (error) {

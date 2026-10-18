@@ -5,7 +5,6 @@ import {
   $, el, loadSession, clearSession, openSession, listSaved, drafts, sheetTotals, monthInfo, shiftMonth, thisMonth,
   fmtHours, fmtDateTime,
 } from './app.js';
-import { setUpChangePassword } from './account.js';
 
 const session = loadSession();
 if (!session?.uk) location.replace('index.html');
@@ -131,7 +130,6 @@ async function start() {
     }
     state.bundle = opened.bundle;
     state.profile = opened.profile;
-    setUpChangePassword(() => ({ bundle: state.bundle, profile: state.profile, session }));
     session.name = opened.profile.name;
     $('#user-name').textContent = opened.profile.name;
     $('#admin-link').hidden = !opened.profile.admin;

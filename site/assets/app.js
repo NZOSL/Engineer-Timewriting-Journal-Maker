@@ -436,6 +436,115 @@ export function passwordProblem(password, username) {
   return null;
 }
 
+// The eye next to a password box shows what's typed only while it's held down (with the
+// mouse, a finger, or Space or Enter), and hides it again the moment it's let go.
+export function holdToShow(button, inputs) {
+  const set = (show) => {
+    for (const input of inputs) input.type = show ? 'text' : 'password';
+    button.classList.toggle('showing', show);
+  };
+  const hide = () => set(false);
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault(); // keeps the cursor in the password box
+    button.setPointerCapture?.(event.pointerId);
+    set(true);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) button.addEventListener(type, hide);
+  button.addEventListener('keydown', (event) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!event.repeat) set(true);
+  });
+  button.addEventListener('keyup', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') hide();
+  });
+  button.addEventListener('click', (event) => event.preventDefault());
+  button.addEventListener('contextmenu', (event) => event.preventDefault()); // a long press on a phone
+  window.addEventListener('blur', hide);
+  return hide;
+}
+
+// ------------------------------------------------------- forgotten passwords
+//
+// "Forgot your password?" asks the office's reset helper (relay/Code.gs) for an email.
+// The data repo's Action then makes new keys for that person and emails a link holding a
+// secret, after the # so it never reaches a web server. The secret opens only a copy of the
+// new user key, published next to their sign-in, and a short-lived profile with just enough
+// to send a new password (see etjm_accounts.py). Their old password works until then.
+
+export async function resetHelper() {
+  const users = await fetchJSON(USERS_URL, 'sign-in list');
+  return typeof users.reset?.url === 'string' && users.reset.url.startsWith('https://') ? users.reset.url : null;
+}
+
+// Ask for a reset email. It says nothing about whether the username exists.
+export async function requestReset(username) {
+  const url = await resetHelper();
+  if (!url) throw new AppError('no-reset', 'Password reset by email isn’t switched on yet. Ask the office for a new password.');
+  const uid = await sha256Hex(`etjm-user:${normalizeUsername(username)}`);
+  try {
+    // "no-cors": the answer is the same whatever happens, so there's nothing to read.
+    await fetch(url, {
+      method: 'POST', mode: 'no-cors', credentials: 'omit', cache: 'no-store', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'request', uid }),
+    });
+  } catch {
+    throw new AppError('network', 'Couldn’t send the request. Check your connection and try again.');
+  }
+}
+
+async function recoverKey(secret) {
+  const base = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: utf8.encode('etjm/recover') }, base, 256));
+}
+
+// What a reset link ({ u, id, k } from the email) opens. status is 'ok', or 'missing' (not on
+// the website yet, or used up), 'replaced' (a newer link was sent), 'expired', 'updating'
+// (the website is changing over: try again shortly) or 'bad' (the link isn't complete).
+export async function openResetLink(link) {
+  const username = normalizeUsername(link?.u);
+  if (!username || !/^[0-9a-f]{16}$/.test(link?.id || '') || !/^[A-Za-z0-9_-]{43}$/.test(link?.k || '')) return { status: 'bad' };
+  const recover = (await userEntry(username))?.recover;
+  if (!recover) return { status: 'missing', username };
+  if (recover.id !== link.id) return { status: 'replaced', username };
+  if (!(Date.parse(recover.expires) > Date.now())) return { status: 'expired', username };
+  let userKey;
+  let profile;
+  try {
+    userKey = await unseal(await recoverKey(b64urlToBytes(link.k)), recover.key, `etjm-recover|${username}|${link.id}`);
+    profile = JSON.parse(fromUtf8.decode(await unseal(userKey, recover.profile, `etjm-recover-profile|${username}|${link.id}`)));
+  } catch {
+    return { status: 'bad', username };
+  }
+  const blob = await fetchJSON(BUNDLE_URL, 'job list');
+  if (blob.epoch !== profile.epoch) return { status: 'updating', username };
+  const bundle = JSON.parse(fromUtf8.decode(await unseal(b64ToBytes(profile.bundleKey), blob.data, `etjm-bundle|${blob.epoch}`)));
+  return { status: 'ok', username, profile, bundle, userKey, expires: recover.expires };
+}
+
+// Send the new password from a reset link, sealed with the link's new user key. Resolves
+// true once the website has it (about a minute).
+export async function finishReset(opened, newPassword) {
+  const { username, profile, bundle, userKey } = opened;
+  if (!bundle.saveToken) throw new AppError('no-save', 'Saving to the office isn’t switched on yet, so passwords can’t be reset. Ask the office.');
+  const saltB64 = bytesToB64(crypto.getRandomValues(new Uint8Array(16)));
+  const iterations = 600000;
+  const key = await seal(await passwordKey(newPassword, saltB64, iterations), userKey, `etjm-user-key|${username}`);
+  const request = { id: profile.recover, wrap: { salt: saltB64, iterations, key } };
+  const token = await seal(userKey, utf8.encode(JSON.stringify(request)), `etjm-recover-pw|${username}|${profile.recover}`);
+  const body = [PASSWORD_MARKER, 'A password reset, encrypted. Only the timewriting system can apply it.', '', '```etjm', `ETJMR1.${token}`, '```', ''].join('\n');
+  await github(bundle, 'POST', `/repos/${bundle.dataRepo}/issues`, { title: `Password change · ${profile.tag}`, body });
+  const deadline = Date.now() + 4 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => { setTimeout(resolve, 6000); });
+    const entry = await userEntry(username).catch(() => null);
+    if (entry?.salt === saltB64) return true;
+  }
+  return false;
+}
+
 // Where each kind of person starts after signing in.
 export const homeFor = (profile) => (profile.timesheets ? 'home.html' : 'admin.html');
 
