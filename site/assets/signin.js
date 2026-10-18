@@ -6,7 +6,7 @@ import {
 } from './app.js';
 
 const params = new URLSearchParams(location.search);
-const next = params.get('next') && /^[a-z]+\.html(\?[\w=&-]*)?$/.test(params.get('next')) ? params.get('next') : null;
+const next = params.get('next') && /^[a-z]+\.html(\?[\w=&.-]*)?$/.test(params.get('next')) ? params.get('next') : null;
 
 if (params.has('signout')) {
   // Signing out also removes this person's already-saved timesheet copies from this computer.

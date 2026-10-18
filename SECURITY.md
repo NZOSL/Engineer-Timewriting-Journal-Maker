@@ -111,6 +111,8 @@ ones, and the epoch moves on, which signs out anyone who had the old password.
   each username, so someone who guesses `firstname.lastname` can check it's in use. Only a
   password opens anything.
 * **Admins are trusted.** The admin token can read and change everything in the data repo.
+  **View** on the Admin page shows an engineer's pages from the verified copies admins can
+  already read; it can't save as them, because that needs the engineer's own timesheet key.
 * **No server means no rate limiting or audit of sign-ins.** All GitHub activity made
   through the website shows as the owner of the tokens.
 * **Tokens expire.** Fine-grained tokens have an end date: renew `SAVE_TOKEN` and

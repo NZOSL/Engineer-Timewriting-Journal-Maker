@@ -233,6 +233,9 @@ button, input, select { font: inherit; color: inherit; }
 .notice-warn { background: var(--warn-bg); }
 .notice-warn strong { color: var(--warn); }
 .notice-error { background: var(--danger-bg); color: var(--danger); }
+.notice-view { background: var(--accent-weak); box-shadow: inset 4px 0 0 var(--accent); }
+.notice-view .notice-text { color: var(--text); }
+.viewing-as .topbar { box-shadow: inset 0 -3px 0 var(--accent); }
 
 /* --------------------------------------------------------------- the grid */
 

@@ -1,11 +1,13 @@
 // The monthly timesheet: one row per job line (CAPEX/REVEX) and per other-time
 // row, one column per day. Changes are kept on this computer straight away;
 // Save sends the month to the office (a GitHub issue in the private data repo).
+// With &as=<username>, an admin sees that engineer's saved month instead, read-only:
+// nothing is kept on this computer and nothing can be saved (see openViewAs in app.js).
 
 import {
   $, el, toast, TASKS, cleanText, fmtHours, parseHours, monthInfo, shiftMonth, thisMonth, isMonth,
   fmtDateTime, drafts, loadSession, openSession, loadSaved, listSaved, saveToGitHub, clearSession,
-  journalLines, journalCells, journalTable,
+  journalLines, journalCells, journalTable, viewAsParam, openViewAs,
 } from './app.js';
 import { fireworks } from './fireworks.js';
 
@@ -13,7 +15,9 @@ const session = loadSession();
 if (!session?.uk) location.replace(`index.html?next=${encodeURIComponent(`timesheet.html${location.search}`)}`);
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const viewing = viewAsParam();
 const state = {
+  viewAs: null, // { person, months } when an admin is looking at someone's timesheets
   bundle: null,
   profile: null,
   sources: new Map(), // month -> { data, saved } that rows can be copied from
@@ -65,7 +69,7 @@ function fromSaved(data) {
 function toSaved(savedAt) {
   return {
     v: 1,
-    employee: session.name,
+    employee: state.viewAs?.person.name ?? session.name,
     month: state.month,
     savedAt,
     jobs: state.draft.jobs.map((row) => {
@@ -93,11 +97,12 @@ function tasksFor(row) {
 let localTimer;
 function persistLocal() {
   clearTimeout(localTimer);
-  if (!state.month) return;
+  if (!state.month || state.viewAs) return;
   drafts.set(session.username, state.month, { v: 1, data: toSaved(state.meta.savedAt || null), meta: state.meta });
 }
 
 function changed() {
+  if (state.viewAs) return;
   state.version += 1;
   state.meta.dirty = true;
   state.meta.localUpdatedAt = new Date().toISOString();
@@ -148,6 +153,15 @@ function updateStatus() {
   const button = $('#save-btn');
   let text;
   let tone = 'muted';
+  if (state.viewAs) {
+    const first = state.viewAs.person.name.split(' ')[0];
+    status.textContent = state.meta.savedAt ? `Viewing ${first}’s save of ${fmtDateTime(state.meta.savedAt)} (read-only)`
+      : `${first} hasn’t saved ${state.info.label} (read-only)`;
+    status.dataset.tone = 'muted';
+    button.hidden = true;
+    for (const id of ['#prev-month', '#next-month']) $(id).disabled = false;
+    return;
+  }
   if (isClosed()) text = 'Closed by the office';
   else if (state.saving) text = 'Saving…';
   else if (state.loading) text = 'Loading…';
@@ -249,7 +263,7 @@ function render() {
 
   let rowIndex = 0;
   const jobBody = el('tbody', { class: 'section-jobs' },
-    sectionRow('Jobs', 'These hours go into the journal.', isClosed() ? null : copySelect()));
+    sectionRow('Jobs', 'These hours go into the journal.', isReadOnly() ? null : copySelect()));
   for (const row of state.draft.jobs) {
     const info = state.jobs.get(row.job);
     const tasks = tasksFor(row);
@@ -316,9 +330,10 @@ function render() {
   wrap.replaceChildren(table);
   wrap.scrollLeft = scroll.left;
   wrap.scrollTop = scroll.top;
+  const locked = isReadOnly();
+  wrap.classList.toggle('readonly', locked);
+  if (locked) wrap.querySelectorAll('input, select, button').forEach((node) => { node.disabled = true; });
   const closed = isClosed();
-  wrap.classList.toggle('readonly', closed);
-  if (closed) wrap.querySelectorAll('input, select, button').forEach((node) => { node.disabled = true; });
   setNotice('closed', closed ? {
     tone: 'info',
     title: `${state.info.label} is closed.`,
@@ -338,7 +353,7 @@ function sectionRow(title, hint, control) {
 function emptyRow() {
   return el('tr', { class: 'empty-row' },
     el('td', { class: 'sticky-1 empty-cell', colspan: 3 },
-      el('p', {}, isClosed() ? 'No jobs were saved for this month.' : 'No jobs yet. Type a job number below, or use “Copy rows from…” to start from a month you saved before.')),
+      el('p', {}, isReadOnly() ? 'No jobs were saved for this month.' : 'No jobs yet. Type a job number below, or use “Copy rows from…” to start from a month you saved before.')),
     el('td', { class: 'adder-fill', colspan: state.info.days }));
 }
 
@@ -726,7 +741,7 @@ function problems() {
 }
 
 async function save() {
-  if (state.saving || state.loading) return;
+  if (state.viewAs || state.saving || state.loading) return; // viewing someone else's: never saves
   persistLocal();
   const [problem] = problems();
   if (problem) {
@@ -766,7 +781,8 @@ async function save() {
 
 // The month's journal lines for this engineer, exactly as the journal will have them.
 function showPreview() {
-  const lines = journalLines(toSaved(state.meta.savedAt || new Date().toISOString()), state.profile.rate, state.bundle.journal);
+  const rate = state.viewAs ? state.viewAs.person.rate : state.profile.rate;
+  const lines = journalLines(toSaved(state.meta.savedAt || new Date().toISOString()), rate, state.bundle.journal);
   const hours = lines.reduce((sum, line) => sum + (line.hours || 0), 0);
   $('#preview-title').textContent = `Journal preview · ${state.info.label}`;
   $('#preview-body').replaceChildren(
@@ -786,9 +802,17 @@ async function openMonth(month) {
   state.month = month;
   state.info = monthInfo(month);
   state.invalid.clear();
-  history.replaceState(null, '', `?month=${month}`);
+  history.replaceState(null, '', `?month=${month}${state.viewAs ? `&as=${encodeURIComponent(state.viewAs.person.username)}` : ''}`);
   $('#month-label').textContent = state.info.label;
   document.title = `${state.info.label} · Engineer Timewriting`;
+  if (state.viewAs) {
+    const saved = state.viewAs.months.get(month);
+    state.draft = saved ? fromSaved(saved.data) : { jobs: [], other: [] };
+    state.meta = saved ? { savedAt: saved.savedAt } : {};
+    render();
+    updateStatus();
+    return;
+  }
   const record = drafts.get(session.username, month);
   state.draft = record ? fromSaved(record.data) : { jobs: [], other: [] };
   state.meta = record?.meta ? { ...record.meta } : {};
@@ -867,7 +891,13 @@ async function start() {
   $('#user-name').textContent = session.name;
   try {
     const opened = await openSession(session);
-    if (!opened.profile.timesheets) {
+    if (viewing) {
+      if (!opened.profile.admin) {
+        location.replace('home.html');
+        return;
+      }
+      state.viewAs = await openViewAs(opened.bundle, opened.profile, viewing);
+    } else if (!opened.profile.timesheets) {
       location.replace('admin.html');
       return;
     }
@@ -931,7 +961,9 @@ async function start() {
   $('#savebar').hidden = false;
   const params = new URLSearchParams(location.search);
   const requested = params.get('month');
+  if (state.viewAs) showViewing();
   await openMonth(isMonth(requested) ? requested : thisMonth());
+  if (state.viewAs) return;
   const source = params.get('copyFrom');
   if (isMonth(source) && source !== state.month) await copyRows(source);
   loadSources();
@@ -968,6 +1000,28 @@ function copySelect() {
 
 function isClosed() {
   return (state.bundle?.closedMonths || []).includes(state.month);
+}
+
+// Closed months, and anyone else's timesheet, can be looked at but not changed.
+function isReadOnly() {
+  return Boolean(state.viewAs) || isClosed();
+}
+
+function showViewing() {
+  const { person } = state.viewAs;
+  const first = person.name.split(' ')[0];
+  document.body.classList.add('viewing-as');
+  const back = document.querySelector('.user a[href="home.html"]');
+  if (back) {
+    back.href = `home.html?as=${encodeURIComponent(person.username)}`;
+    back.textContent = `${first}’s timesheets`;
+  }
+  setNotice('viewing', {
+    tone: 'view',
+    title: `Viewing ${person.name}’s timesheet, read-only.`,
+    text: 'This is their last save for the month, as they see it. Hours they haven’t saved yet are only on their own computer.',
+    action: { label: 'Back to Admin', run: () => { location.href = 'admin.html'; } },
+  });
 }
 
 if (session) start();

@@ -1,16 +1,20 @@
 // "My timesheets": the signed-in person's months, saved to the office or kept on
 // this computer. Open one to change it, or reuse one to start another month.
+// With ?as=<username>, an admin sees that engineer's page instead, read-only (see
+// openViewAs in app.js).
 
 import {
   $, el, loadSession, clearSession, openSession, listSaved, drafts, sheetTotals, monthInfo, shiftMonth, thisMonth,
-  fmtHours, fmtDateTime,
+  fmtHours, fmtDateTime, viewAsParam, openViewAs,
 } from './app.js';
 
 const session = loadSession();
 if (!session?.uk) location.replace('index.html');
 
-const state = { bundle: null, canSave: false, sheets: new Map(), loadError: null };
-const open = (month, copyFrom) => `timesheet.html?month=${month}${copyFrom ? `&copyFrom=${copyFrom}` : ''}`;
+const viewing = viewAsParam();
+const state = { bundle: null, canSave: false, sheets: new Map(), loadError: null, viewAs: null };
+const open = (month, copyFrom) => `timesheet.html?month=${month}${copyFrom ? `&copyFrom=${copyFrom}` : ''}${
+  state.viewAs ? `&as=${encodeURIComponent(state.viewAs.person.username)}` : ''}`;
 
 function hasRows(data) {
   return Boolean(data?.jobs?.length || data?.other?.length);
@@ -51,6 +55,33 @@ function collect(saved, { complete = false } = {}) {
   return sheets;
 }
 
+// Viewing as someone: only the months they've saved (the office can't see their computer).
+function collectViewed() {
+  const sheets = new Map();
+  for (const [month, item] of state.viewAs.months) {
+    const closed = (state.bundle?.closedMonths || []).includes(month);
+    sheets.set(month, {
+      month, data: item.data, totals: sheetTotals(item.data),
+      status: closed ? { tone: 'muted', text: 'Closed by the office' } : { tone: 'ok', text: `Saved ${fmtDateTime(item.savedAt)}` },
+    });
+  }
+  return sheets;
+}
+
+function showViewing() {
+  const { person } = state.viewAs;
+  const first = person.name.split(' ')[0];
+  document.title = `${person.name}’s timesheets (view only) · Engineer Timewriting`;
+  document.body.classList.add('viewing-as');
+  $('#all-sheets').textContent = `${first}’s timesheets`;
+  $('#all-sheets').nextElementSibling.textContent = `What ${first} sees on My timesheets. Open a month to see their hours. Nothing here can be changed.`;
+  $('#notices').replaceChildren(el('div', { class: 'notice notice-view' },
+    el('div', { class: 'notice-text' }, el('strong', {}, `Viewing ${person.name}’s timesheets, read-only. `),
+      `This is what they see, from the months they’ve saved${person.active ? '' : ' (they’ve left, so they can’t sign in)'}. `
+      + 'Hours they haven’t saved yet are only on their own computer.'),
+    el('a', { class: 'btn btn-sm', href: 'admin.html' }, 'Back to Admin')));
+}
+
 function render() {
   const current = thisMonth();
   const info = monthInfo(current);
@@ -63,14 +94,17 @@ function render() {
     ? el('span', {}, el('span', { class: `chip chip-${sheet.status.tone}` }, sheet.status.text),
       ` Jobs ${fmtHours(sheet.totals.jobs)} h · Other ${fmtHours(sheet.totals.other)} h`)
     : el('span', {}, 'Not started yet.'));
-  $('#hero-actions').replaceChildren(...[
-    el('a', { class: 'btn btn-primary', href: open(current) }, sheet ? `Open ${info.label}` : `Start ${info.label}`),
-    !sheet && before && el('a', { class: 'btn', href: open(current, before) }, `Start from ${monthInfo(before).label}`),
-  ].filter(Boolean));
+  $('#hero-actions').replaceChildren(...(state.viewAs
+    ? [sheet && el('a', { class: 'btn btn-primary', href: open(current) }, `View ${info.label}`)]
+    : [
+      el('a', { class: 'btn btn-primary', href: open(current) }, sheet ? `Open ${info.label}` : `Start ${info.label}`),
+      !sheet && before && el('a', { class: 'btn', href: open(current, before) }, `Start from ${monthInfo(before).label}`),
+    ]).filter(Boolean));
 
   const body = $('#sheets');
   if (!months.length) {
-    body.replaceChildren(el('p', { class: 'muted pad' }, state.loadError ? 'Nothing on this computer yet.' : 'No timesheets yet. Start this month above.'));
+    body.replaceChildren(el('p', { class: 'muted pad' }, state.viewAs ? 'They haven’t saved any timesheets yet.'
+      : state.loadError ? 'Nothing on this computer yet.' : 'No timesheets yet. Start this month above.'));
     return;
   }
   const rows = months.map((month) => {
@@ -81,9 +115,10 @@ function render() {
       el('td', {}, el('span', { class: `chip chip-${item.status.tone}` }, item.status.text)),
       el('td', { class: 'num' }, fmtHours(item.totals.jobs)),
       el('td', { class: 'num' }, fmtHours(item.totals.other)),
-      el('td', { class: 'row-actions' },
-        el('a', { class: 'btn btn-sm', href: open(month) }, 'Open'),
-        el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showReuse(e.currentTarget, month) }, 'Reuse…')));
+      el('td', { class: 'row-actions' }, ...(state.viewAs
+        ? [el('a', { class: 'btn btn-sm', href: open(month) }, 'View')]
+        : [el('a', { class: 'btn btn-sm', href: open(month) }, 'Open'),
+          el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showReuse(e.currentTarget, month) }, 'Reuse…')])));
   });
   body.replaceChildren(el('table', { class: 'sheets' },
     el('thead', {}, el('tr', {},
@@ -124,6 +159,20 @@ async function start() {
   $('#user-name').textContent = session.name;
   try {
     const opened = await openSession(session);
+    if (viewing) {
+      if (!opened.profile.admin) {
+        location.replace('home.html');
+        return;
+      }
+      state.bundle = opened.bundle;
+      $('#user-name').textContent = opened.profile.name;
+      $('#admin-link').hidden = false;
+      state.viewAs = await openViewAs(opened.bundle, opened.profile, viewing);
+      showViewing();
+      state.sheets = collectViewed();
+      render();
+      return;
+    }
     if (!opened.profile.timesheets) {
       location.replace('admin.html');
       return;

@@ -482,7 +482,9 @@ function renderStaff(message) {
     el('td', {}, emailInput(person, edits.emails)),
     el('td', {}, el('span', { class: 'rate-prefix' }, '$'), rateInput(person)),
     passwordCell(person),
-    el('td', { class: 'row-actions' }, el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => {
+    el('td', { class: 'row-actions' },
+      el('a', { class: 'btn btn-sm', href: `home.html?as=${encodeURIComponent(person.username)}`, title: `See ${person.name}’s timesheets as they do (read-only)` }, 'View'),
+      el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => {
       const on = !edits.remove.has(person.username);
       if (on) edits.remove.add(person.username); else edits.remove.delete(person.username);
       e.currentTarget.textContent = on ? 'Undo' : 'Remove';
@@ -544,6 +546,7 @@ function renderStaff(message) {
     el('summary', {}, `Former engineers (${former.length})`),
     el('p', { class: 'muted' }, 'They can’t sign in. Their past timesheets stay in the journals at their old rate.'),
     el('ul', {}, former.map((person) => el('li', {}, `${person.name} ($${person.rechargeRate ?? '?'})`,
+      el('a', { class: 'link-btn', href: `home.html?as=${encodeURIComponent(person.username)}` }, 'View'),
       el('button', { class: 'link-btn', type: 'button', onclick: (e) => {
         const on = !edits.restore.has(person.username);
         if (on) edits.restore.add(person.username); else edits.restore.delete(person.username);

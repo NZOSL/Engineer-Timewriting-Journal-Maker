@@ -43,7 +43,8 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 **Admins** (listed under `admins` in the data repo's settings) sign in to the **Admin** page, where they can:
 - upload a new *Job Task Overview* report, which is checked, saved in the private repo and published to the website within a minute or two;
 - add and remove engineers, set each engineer's recharge rate (there's no default rate) and email address (for password resets), and see, copy or reset passwords;
-- view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save).
+- view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save);
+- **View** an engineer's pages as they see them, read-only (from their saved months; nothing can be changed or saved).
 
 Engineers can copy their jobs and other-time rows from any month they've saved (**Copy rows from…** on the timesheet, or **Reuse** on My timesheets). Closed months are read-only.
 

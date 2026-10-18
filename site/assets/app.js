@@ -715,6 +715,34 @@ export function adminRepo(bundle, profile) {
   };
 }
 
+// --------------------------------------------------------------- viewing as
+//
+// "View" on the Admin page shows an engineer's pages as they see them, read-only. It uses
+// each month's last verified save, which the Actions keep (encrypted) in the data repo and
+// the journals are built from, so admins see nothing new. Nothing can be changed: saving
+// needs the engineer's own timesheet key, which admins don't have. Hours an engineer has
+// typed but not saved are only on their computer, so they don't show.
+
+export const viewAsParam = () => normalizeUsername(new URLSearchParams(location.search).get('as') || '');
+
+export async function openViewAs(bundle, profile, username) {
+  if (!profile.admin || !profile.adminToken || !profile.storeKey) {
+    throw new AppError('view-as', 'Only the office can look at someone else’s timesheets.');
+  }
+  const repo = adminRepo(bundle, profile);
+  const settings = (await repo.readJson('settings.json'))?.data || {};
+  const employee = (settings.employees || []).find((e) => normalizeUsername(e.username || defaultUsername(e.name)) === username);
+  if (!employee) throw new AppError('view-as', `There’s no engineer with the username ${username}.`);
+  const files = (await repo.list('timesheets')).filter((f) => f.type === 'file' && f.name.endsWith('.json'));
+  const months = new Map();
+  for (const file of files) {
+    const month = JSON.parse(fromUtf8.decode(await repo.read(file.path)));
+    const theirs = (month.timesheets || []).find((t) => t.username === username);
+    if (theirs && isMonth(month.month)) months.set(month.month, { month: month.month, savedAt: theirs.savedAt, data: theirs });
+  }
+  return { person: { name: employee.name, username, rate: employee.rechargeRate ?? null, active: employee.active !== false }, months };
+}
+
 // The username settings.json gives someone by default ("Alex Smith" -> "alex.smith"),
 // the same as default_username() in tools/etjm_core.py.
 export function defaultUsername(name) {
