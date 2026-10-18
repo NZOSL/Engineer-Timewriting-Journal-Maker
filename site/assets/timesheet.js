@@ -261,7 +261,29 @@ function render() {
     totals.push(refs.dayTotals[day]);
   }
 
+  // Other time first, then jobs, as in the engineers' spreadsheet.
   let rowIndex = 0;
+  const otherBody = el('tbody', { class: 'section-other' },
+    sectionRow('Other time', 'Leave, general time and so on. Not in the journal.'));
+  for (const row of state.draft.other) {
+    const labelCell = el('td', { class: 'c-label sticky-1 other-cell' },
+      el('div', { class: 'other-head' },
+        row.custom
+          ? el('input', {
+            class: 'detail other-label', value: row.label, maxLength: 100, placeholder: 'Describe the time, e.g. Special project',
+            'aria-label': 'Description of other time', dataset: { uid: row.uid },
+          })
+          : el('span', { class: 'other-name' }, row.label),
+        removeButton('other', row, row.label || 'this row')));
+    otherBody.append(lineRow(`o:${row.uid}:-`, row.hours, row.label || 'Other time', rowIndex, {
+      lead: [labelCell],
+      type: el('td', { class: 'c-type sticky-2 muted' }, '—'),
+    }));
+    rowIndex += 1;
+  }
+  otherBody.append(el('tr', { class: 'adder-row' },
+    el('td', { class: 'sticky-1 adder-cell', colspan: 3 }, otherAdder()), el('td', { class: 'adder-fill', colspan: days })));
+
   const jobBody = el('tbody', { class: 'section-jobs' },
     sectionRow('Jobs', 'These hours go into the journal.', isReadOnly() ? null : copySelect()));
   for (const row of state.draft.jobs) {
@@ -298,32 +320,11 @@ function render() {
   jobBody.append(el('tr', { class: 'adder-row' },
     el('td', { class: 'sticky-1 adder-cell', colspan: 3 }, jobAdder()), el('td', { class: 'adder-fill', colspan: days })));
 
-  const otherBody = el('tbody', { class: 'section-other' },
-    sectionRow('Other time', 'Leave, general time and so on. Not in the journal.'));
-  for (const row of state.draft.other) {
-    const labelCell = el('td', { class: 'c-label sticky-1 other-cell' },
-      el('div', { class: 'other-head' },
-        row.custom
-          ? el('input', {
-            class: 'detail other-label', value: row.label, maxLength: 100, placeholder: 'Describe the time, e.g. Special project',
-            'aria-label': 'Description of other time', dataset: { uid: row.uid },
-          })
-          : el('span', { class: 'other-name' }, row.label),
-        removeButton('other', row, row.label || 'this row')));
-    otherBody.append(lineRow(`o:${row.uid}:-`, row.hours, row.label || 'Other time', rowIndex, {
-      lead: [labelCell],
-      type: el('td', { class: 'c-type sticky-2 muted' }, '—'),
-    }));
-    rowIndex += 1;
-  }
-  otherBody.append(el('tr', { class: 'adder-row' },
-    el('td', { class: 'sticky-1 adder-cell', colspan: 3 }, otherAdder()), el('td', { class: 'adder-fill', colspan: days })));
-
   const table = el('table', { class: 'grid' },
     el('colgroup', {}, cols),
     el('thead', {}, el('tr', { class: 'days' }, head), el('tr', { class: 'totals' }, totals)),
-    jobBody,
-    otherBody);
+    otherBody,
+    jobBody);
   refs.rowCount = rowIndex;
   const wrap = $('#grid-wrap');
   const scroll = { left: wrap.scrollLeft, top: wrap.scrollTop };
