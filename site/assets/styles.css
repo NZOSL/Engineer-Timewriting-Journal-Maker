@@ -718,6 +718,8 @@ html.framed body { display: none !important; }
 .staff th, .staff td { padding-left: 12px; padding-right: 12px; }
 .email-input { width: 210px; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
 .email-input.invalid { border-color: var(--danger); }
+.email-field { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.email-text { overflow-wrap: anywhere; }
 .add-row .email-input { height: 34px; border-radius: 8px; }
 .office { margin-top: 22px; }
 .office h3 { margin: 0 0 4px; font-size: 15px; }

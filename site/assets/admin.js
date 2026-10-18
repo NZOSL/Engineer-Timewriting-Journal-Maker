@@ -465,6 +465,27 @@ function renderStaff(message) {
     },
   });
 
+  // Shown as plain text; "Change" (or "Add email") opens a box for it, and "Cancel" puts it back.
+  const emailField = (person, map) => {
+    const box = el('div', { class: 'email-field' });
+    const edit = () => {
+      const input = emailInput(person, map);
+      box.replaceChildren(input, el('button', { class: 'link-btn', type: 'button', onclick: show }, 'Cancel'));
+      input.focus();
+      input.select();
+    };
+    const show = () => {
+      map.delete(person.username);
+      box.replaceChildren(
+        person.email ? el('span', { class: 'email-text' }, person.email) : el('span', { class: 'muted' }, 'No email yet'),
+        el('button', { class: 'link-btn', type: 'button', onclick: edit, 'aria-label': `${person.email ? 'Change' : 'Add'} the email address for ${person.name}` },
+          person.email ? 'Change' : 'Add email'));
+      changed();
+    };
+    show();
+    return box;
+  };
+
   const rateInput = (person) => el('input', {
     class: 'rate-input', type: 'number', min: '1', step: '0.01', inputmode: 'decimal', required: true,
     value: person.rechargeRate ?? '', 'aria-label': `Recharge rate for ${person.name}`,
@@ -479,7 +500,7 @@ function renderStaff(message) {
   const rows = current.map((person) => el('tr', { dataset: { username: person.username } },
     el('th', { scope: 'row' }, person.name),
     el('td', { class: 'muted' }, person.username),
-    el('td', {}, emailInput(person, edits.emails)),
+    el('td', {}, emailField(person, edits.emails)),
     el('td', {}, el('span', { class: 'rate-prefix' }, '$'), rateInput(person)),
     passwordCell(person),
     el('td', { class: 'row-actions' },
@@ -540,7 +561,7 @@ function renderStaff(message) {
       el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, 'Name'), el('th', { scope: 'col' }, 'Username'), el('th', { scope: 'col' }, 'Email'))),
       el('tbody', {}, admins.map((person) => el('tr', {},
         el('th', { scope: 'row' }, person.name), el('td', { class: 'muted' }, person.username),
-        el('td', {}, emailInput(person, edits.adminEmails))))))) : null;
+        el('td', {}, emailField(person, edits.adminEmails))))))) : null;
 
   const formerList = former.length ? el('details', { class: 'former' },
     el('summary', {}, `Former engineers (${former.length})`),
