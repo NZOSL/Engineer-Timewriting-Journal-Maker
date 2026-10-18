@@ -54,6 +54,13 @@ class Vault:
         self.master = master
         self.key = store_key(master)
 
+    @classmethod
+    def from_store_key(cls, root: Path, key: bytes) -> "Vault":
+        """Read-only use with just the file key (as an admin's profile has it), without MASTER_KEY."""
+        vault = cls.__new__(cls)
+        vault.root, vault.master, vault.key = Path(root), None, key
+        return vault
+
     def _aad(self, rel: str) -> str:
         return f"etjm-file|{rel}"
 

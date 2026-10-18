@@ -421,5 +421,66 @@ class MasterKeyChangeTests(unittest.TestCase):
                              [(4, f"Timesheet 2026-09 · {user_tag(new, 'ann.example')}"), (5, f"Password change · {user_tag(new, 'ben.sample')}")])
 
 
+
+class LostMasterKeyTests(unittest.TestCase):
+    """MASTER_KEY replaced with nobody knowing the old one: an admin's sign-in rebuilds it all."""
+
+    def test_an_admin_sign_in_re_encrypts_everything_for_a_new_key(self):
+        from build_outputs import write_tree
+        from recover_master_key import recover
+        from test_etjm import collected, settings as journal_settings, sheet
+
+        from etjm_outputs import build_all
+        from etjm_vault import Vault
+
+        old, new = MASTER, bytes(range(2, 34))
+        keys, settings, everyone, state = setup_world()
+        ben_key = keys.user_key("ben.sample", state["users"]["ben.sample"])  # Ben chooses his own password
+        token = seal(ben_key, json.dumps({"seq": 5, "wrap": wrap_user_key(ben_key, "bens own secret words", "ben.sample")}).encode(), "etjm-pw|ben.sample")
+        apply_password_changes(state, keys, [{"number": 1, "state": "open", "title": f"Password change · {user_tag(old, 'ben.sample')}",
+                                              "body": f"{PASSWORD_V1}\n```etjm\nETJMP1.{token}\n```\n"}], NOW)
+        self.assertTrue(state["users"]["ben.sample"]["own"])
+        handle_reset_requests(state, keys, [reset_request(2, "ann.example")], everyone, NOW)
+        passwords = {u: keys.password(u, r) for u, r in state["users"].items() if r.get("password")}
+        user_keys = {u: keys.user_key(u, r) for u, r in state["users"].items()}
+        data_keys = {u: keys.data_keys(u, r) for u, r in state["users"].items()}
+        wraps = {u: dict(r["wrap"]) for u, r in state["users"].items()}
+        public = publish(state, keys, settings, everyone)
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            vault = Vault(data, old)
+            vault.write_json("settings.json", SETTINGS)
+            vault.write_json("users.json", state)
+            vault.write_json("generated/jobs.json", {"jobs": []})
+            timesheets, _ = collected([sheet(month="2026-09", jobs=[{"job": "JOB000010", "hours": {"REVEX": {"1": 2}}}])])
+            write_tree(vault, build_all(timesheets, journal_settings(), {})[0])
+            months = {f: sorted(vault.months(f)) for f in ("output", "timesheets")}
+
+            with self.assertRaises(ValueError):
+                recover(data, public, "dee.office", "not the password", new)
+            with self.assertRaises(ValueError):  # an engineer's sign-in can't open the files
+                recover(data, public, "ann.example", passwords["ann.example"], new)
+
+            result = recover(data, public, "dee.office", passwords["dee.office"], new)
+
+            self.assertEqual((sorted(result["kept"]), result["reset"]), (["ann.example", "dee.office"], ["ben.sample"]))
+            self.assertEqual(result["renames"], {user_tag(old, u): user_tag(new, u) for u in ("ann.example", "dee.office")})
+            fresh = Vault(data, new)
+            self.assertEqual(fresh.read_json("settings.json"), SETTINGS)
+            self.assertEqual({f: sorted(fresh.months(f)) for f in ("output", "timesheets")}, months)
+            moved, new_keys = fresh.read_json("users.json"), Keys(new)
+            for username in ("ann.example", "dee.office"):
+                record = moved["users"][username]
+                self.assertEqual(record["wrap"], wraps[username])  # the same password opens the same key
+                self.assertEqual(new_keys.user_key(username, record), user_keys[username])
+                self.assertEqual(new_keys.password(username, record), passwords[username])
+                self.assertNotIn("recover", record)
+            self.assertEqual(new_keys.data_keys("ann.example", moved["users"]["ann.example"]), data_keys["ann.example"])
+            ben = moved["users"]["ben.sample"]  # nobody knew Ben's password: a fresh issued one
+            self.assertFalse(ben["own"])
+            self.assertEqual(unwrap_user_key(ben["wrap"], new_keys.password("ben.sample", ben), "ben.sample"), new_keys.user_key("ben.sample", ben))
+            self.assertEqual(len(new_keys.data_keys("ben.sample", ben)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

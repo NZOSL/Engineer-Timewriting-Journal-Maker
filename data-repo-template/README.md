@@ -108,4 +108,8 @@ Everyone keeps their password, and nobody notices.
    everything with the new key, and renames the timesheet issues to match.
 5. When it has finished, edit `MASTER_KEY` and paste the new key again, then delete `NEW_MASTER_KEY`.
 
+If `MASTER_KEY` was replaced and nobody has the old value, the Action fails because nothing opens.
+An admin's sign-in can still re-encrypt everything for the new key, keeping everyone's password:
+see `tools/recover_master_key.py` in the website repo (run it on a computer with both repos).
+
 Anyone who can sign in can, with some effort, get the save token. That lets them see the timesheet issues, but each one is encrypted for its owner. They can't read them, and changes they make are ignored. The save token can't reach anything else here. The admin token can, so only admins can unlock it — and even with it, the files here are encrypted.
