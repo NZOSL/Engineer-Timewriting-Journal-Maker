@@ -14,8 +14,8 @@ if (!session?.uk) location.replace('index.html');
 
 const viewing = viewAsParam();
 const state = { bundle: null, profile: null, canSave: false, sheets: new Map(), loadError: null, viewAs: null };
-const open = (month, copyFrom) => `timesheet.html?month=${month}${copyFrom ? `&copyFrom=${copyFrom}` : ''}${
-  state.viewAs ? `&as=${encodeURIComponent(state.viewAs.person.username)}` : ''}`;
+const open = (month, copyFrom, withClosed) => `timesheet.html?month=${month}${copyFrom ? `&copyFrom=${copyFrom}` : ''}${
+  copyFrom && withClosed ? '&closed=1' : ''}${state.viewAs ? `&as=${encodeURIComponent(state.viewAs.person.username)}` : ''}`;
 const isClosed = (month) => (state.bundle?.closedMonths || []).includes(month);
 
 function hasRows(data) {
@@ -193,19 +193,35 @@ function showNewPanel() {
   const empty = el('input', { type: 'radio', name: 'start-with', value: 'empty', checked: !sources.length });
   const sourceSelect = el('select', { id: 'new-source', class: 'reuse-select', disabled: !sources.length, 'aria-label': 'Month to reuse' },
     sources.map((m) => el('option', { value: m }, monthInfo(m).label)));
+  // Closed jobs (no longer open in Business Central) are left out unless ticked.
+  const openJobs = new Set((state.bundle?.jobs || []).map((job) => job.no));
+  const withClosed = el('input', { id: 'new-closed', type: 'checkbox' });
+  const closedLabel = el('span', {});
+  const closedRow = el('label', { class: 'check new-sub' }, withClosed, ' Also copy closed jobs ', closedLabel);
+  const updateClosed = () => {
+    const count = (state.sheets.get(sourceSelect.value)?.data?.jobs || []).filter((job) => !openJobs.has(job.job)).length;
+    closedLabel.textContent = sources.length ? `(${count || 'none'} in ${monthInfo(sourceSelect.value).label})` : '';
+    closedLabel.className = 'muted';
+    withClosed.disabled = !reuse.checked || !count;
+    if (withClosed.disabled) withClosed.checked = false;
+  };
   let sourceTouched = false;
   const defaultSource = () => {
-    if (sourceTouched || !sources.length) return;
-    sourceSelect.value = sources.find((m) => m < monthSelect.value) || sources[0]; // the latest month before it
+    if (!sourceTouched && sources.length) sourceSelect.value = sources.find((m) => m < monthSelect.value) || sources[0]; // the latest month before it
+    updateClosed();
   };
   defaultSource();
   monthSelect.addEventListener('change', defaultSource);
   sourceSelect.addEventListener('change', () => {
     sourceTouched = true;
     reuse.checked = true;
+    updateClosed();
   });
+  reuse.addEventListener('change', updateClosed);
+  empty.addEventListener('change', updateClosed);
   const startButton = el('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
-    location.href = open(monthSelect.value, reuse.checked && sourceSelect.value ? sourceSelect.value : null);
+    const source = reuse.checked && sourceSelect.value ? sourceSelect.value : null;
+    location.href = open(monthSelect.value, source, withClosed.checked);
   } }, 'Start timesheet');
   panel.replaceChildren(
     el('div', { class: 'new-grid' },
@@ -213,7 +229,7 @@ function showNewPanel() {
       el('fieldset', { class: 'new-choice' },
         el('legend', {}, 'Start with'),
         el('label', { class: 'check' }, reuse, ' Copy job template from ', sourceSelect),
-        sources.length ? null : el('p', { class: 'muted small' }, 'Nothing to reuse yet: your first timesheet starts empty.'),
+        sources.length ? closedRow : el('p', { class: 'muted small' }, 'Nothing to reuse yet: your first timesheet starts empty.'),
         el('label', { class: 'check' }, empty, ' An empty timesheet'))),
     el('div', { class: 'new-actions' }, startButton,
       el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { panel.hidden = true; } }, 'Cancel')));

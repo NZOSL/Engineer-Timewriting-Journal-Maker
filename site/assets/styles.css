@@ -577,6 +577,8 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .new-choice legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
 .new-choice .check { color: var(--text); flex-wrap: wrap; }
 .new-choice .small { margin: -4px 0 0 24px; font-size: 13px; }
+.new-choice .new-sub { margin: -2px 0 2px 26px; font-size: 14px; }
+.new-choice .new-sub:has(input:disabled) { opacity: 0.6; }
 .new-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Deleting a month */

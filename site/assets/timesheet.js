@@ -690,7 +690,9 @@ function otherAdder() {
 }
 
 // Reuse another month's sheet: its jobs and other-time rows, without the hours.
-async function copyRows(source) {
+// Copy another month's jobs and other-time rows (not the hours). Jobs that aren't open any
+// more are left out, unless `includeClosed` (New timesheet's "Also copy closed jobs").
+async function copyRows(source, { includeClosed = false } = {}) {
   let data = state.sources.get(source)?.data || drafts.get(session.username, source)?.data;
   if (!data?.jobs?.length && !data?.other?.length && state.canSave) {
     try {
@@ -708,9 +710,15 @@ async function copyRows(source) {
   let skipped = 0;
   for (const old of data.jobs || []) {
     const info = state.jobs.get(old.job);
-    if (!info) skipped += 1;
-    if (!info || have.has(old.job)) continue;
-    state.draft.jobs.push({ uid: uid(), job: old.job, location: info.loc, owner: info.owner, description: info.desc, hours: { CAPEX: {}, REVEX: {} } });
+    if (have.has(old.job)) continue;
+    if (!info && !includeClosed) {
+      skipped += 1;
+      continue;
+    }
+    state.draft.jobs.push({
+      uid: uid(), job: old.job, location: info?.loc ?? old.location ?? '', owner: info?.owner ?? old.owner ?? '',
+      description: info?.desc ?? old.description ?? '', hours: { CAPEX: {}, REVEX: {} },
+    });
     have.add(old.job);
     jobs += 1;
   }
@@ -967,7 +975,7 @@ async function start() {
   await openMonth(isMonth(requested) ? requested : thisMonth());
   if (state.viewAs) return;
   const source = params.get('copyFrom');
-  if (isMonth(source) && source !== state.month) await copyRows(source);
+  if (isMonth(source) && source !== state.month) await copyRows(source, { includeClosed: params.get('closed') === '1' });
   loadSources();
 }
 
