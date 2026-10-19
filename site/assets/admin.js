@@ -303,6 +303,23 @@ async function showJournal(row, month, files) {
   }
 }
 
+// "Include jobs with no hours in the engineer workbooks": remembered on this computer.
+const HOURS_ONLY = ' (only jobs with hours).xlsx';
+const EMPTY_JOBS_KEY = 'etjm.admin.emptyJobs.v1';
+const includeEmptyJobs = () => $('#include-empty')?.checked !== false;
+
+function setUpEmptyJobsOption() {
+  const box = $('#include-empty');
+  try {
+    box.checked = localStorage.getItem(EMPTY_JOBS_KEY) !== 'no';
+  } catch { /* storage unavailable: keep the default */ }
+  box.addEventListener('change', () => {
+    try {
+      localStorage.setItem(EMPTY_JOBS_KEY, box.checked ? 'yes' : 'no');
+    } catch { /* not remembered */ }
+  });
+}
+
 async function loadJournals() {
   const box = $('#journals');
   try {
@@ -320,7 +337,12 @@ async function loadJournals() {
       const files = byMonth.get(month);
       const csv = files.find((f) => f.name.endsWith('.csv'));
       const xlsx = files.find((f) => f.name.startsWith('Timewriting Journal') && f.name.endsWith('.xlsx'));
-      const workbooks = files.filter((f) => f.name.startsWith('Engineer timewriting'));
+      // Each engineer's workbook, and (if they have jobs with no hours) a copy without those.
+      const workbooks = files.filter((f) => f.name.startsWith('Engineer timewriting') && !f.name.endsWith(HOURS_ONLY));
+      const pick = (f) => {
+        const short = files.find((g) => g.name === f.name.replace(/\.xlsx$/, HOURS_ONLY));
+        return includeEmptyJobs() || !short ? f : { name: f.name, data: short.data };
+      };
       const closed = (state.settings?.closedMonths || []).includes(month);
       const tr = el('tr', {},
         el('th', { scope: 'row' }, monthInfo(month).label,
@@ -331,8 +353,8 @@ async function loadJournals() {
           xlsx && el('button', { class: 'btn btn-sm', type: 'button', onclick: () => download(xlsx) }, 'Journal Excel'),
           workbooks.length ? el('details', { class: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
             el('div', { class: 'workbook-list' },
-              workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks) }, `All (${workbooks.length}, as one .zip)`) : null,
-              workbooks.map((f) => el('button', { class: 'link-btn', type: 'button', onclick: () => download(f) },
+              workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,
+              workbooks.map((f) => el('button', { class: 'link-btn', type: 'button', onclick: () => download(pick(f)) },
               f.name.replace(/^Engineer timewriting - /, '').replace(/ - [A-Za-z]+ \d{4}\.xlsx$/, ''))))) : null),
         el('td', { class: 'row-actions' },
           el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showJournal(e.currentTarget.closest('tr'), month, files) }, 'View'),
@@ -717,6 +739,7 @@ async function start() {
   }
   state.repo = adminRepo(state.bundle, state.profile);
   setUpUpload();
+  setUpEmptyJobsOption();
   try {
     await loadSettings();
   } catch (error) {

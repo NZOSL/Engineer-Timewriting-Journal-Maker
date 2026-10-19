@@ -125,11 +125,13 @@ function confirmDelete(button, month) {
   const row = button.closest('tr');
   const label = monthInfo(month).label;
   const sheet = state.sheets.get(month);
+  // Saved to the office, even if GitHub's search hasn't listed it yet.
+  const saved = Boolean(sheet.saved || sheet.local?.meta?.savedAt);
   const go = el('button', { class: 'btn btn-sm btn-danger', type: 'button' }, `Delete ${label}`);
   const cancel = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => panel.remove() }, 'Cancel');
   const panel = el('tr', { class: 'confirm-row' }, el('td', { colspan: 5 },
     el('div', { class: 'confirm-panel', role: 'alertdialog', 'aria-label': `Delete ${label}?` },
-      el('span', {}, el('strong', {}, `Delete ${label}? `), sheet.saved
+      el('span', {}, el('strong', {}, `Delete ${label}? `), saved
         ? 'Its hours are taken out of the office’s journal and workbooks too. This can’t be undone.'
         : 'It’s only on this computer, so it’s simply removed. This can’t be undone.'),
       el('span', { class: 'confirm-actions' }, go, cancel))));
@@ -138,7 +140,9 @@ function confirmDelete(button, month) {
     cancel.disabled = true;
     go.textContent = 'Deleting…';
     try {
-      const wasSaved = sheet.saved ? await deleteSaved(state.bundle, state.profile, session.username, month) : false;
+      const wasSaved = state.canSave
+        ? await deleteSaved(state.bundle, state.profile, session.username, month, sheet.saved?.issue || sheet.local?.meta?.issue)
+        : false;
       drafts.remove(session.username, month);
       state.sheets.delete(month);
       render();

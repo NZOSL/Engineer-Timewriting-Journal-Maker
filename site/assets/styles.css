@@ -607,6 +607,7 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .card-head { padding: 20px 24px 4px; }
 .card-head h1, .card-head h2 { margin: 0 0 4px; font-size: 18px; letter-spacing: -0.01em; }
 .card-head p { margin: 0; }
+.workbook-option { margin-top: 10px; color: var(--text); }
 .card-body { padding: 16px 24px 24px; }
 .dropzone {
   display: grid;

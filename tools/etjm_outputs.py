@@ -13,6 +13,7 @@ written with fixed timestamps, so rebuilding unchanged data gives identical file
 from __future__ import annotations
 
 import csv
+import dataclasses
 import datetime as dt
 import io
 import json
@@ -406,6 +407,10 @@ def summary_markdown(timesheets, lines, checks, settings, year, month, files) ->
     return "\n".join(out) + "\n"
 
 
+# The Admin page can download each engineer workbook without the jobs that have no hours.
+WITH_HOURS_ONLY = " (only jobs with hours)"
+
+
 def build_month(timesheets: list[Timesheet], settings: dict, jobs_index: dict,
                 year: int, month: int) -> tuple[dict[str, bytes], list[str]]:
     key = f"{year:04d}-{month:02d}"
@@ -429,6 +434,9 @@ def build_month(timesheets: list[Timesheet], settings: dict, jobs_index: dict,
         name = f"Engineer timewriting - {safe_file_part(ts.employee)} - {month_title(year, month)}.xlsx"
         names.append(name)
         files[f"{folder}/{name}"] = engineer_xlsx(ts, jobs_index, _created([ts]))
+        if any(not line.total for line in ts.jobs):
+            worked = dataclasses.replace(ts, jobs=[line for line in ts.jobs if line.total])
+            files[f"{folder}/{name[:-len('.xlsx')]}{WITH_HOURS_ONLY}.xlsx"] = engineer_xlsx(worked, jobs_index, _created([ts]))
         files[f"timesheets/{key}/{ts.username or slugify(ts.employee)}.json"] = (
             json.dumps(ts.to_json(), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     files[f"{folder}/README.md"] = summary_markdown(

@@ -835,9 +835,18 @@ export async function loadSaved(bundle, profile, username, month) {
 
 // Delete a month that isn't closed. It's saved as an encrypted "deleted" copy, like any
 // save, so only its engineer can do it and an older copy can't bring it back; the journal
-// and workbooks then leave it out. Returns false if it was never saved to the office.
-export async function deleteSaved(bundle, profile, username, month) {
-  if (!(await findIssue(bundle, profile, month))) return false;
+// and workbooks then leave it out. `issueNumber` (remembered when it was saved) finds it
+// even before GitHub's search has caught up. Returns false if it was never saved.
+export async function deleteSaved(bundle, profile, username, month, issueNumber) {
+  let issue = await findIssue(bundle, profile, month);
+  if (!issue && issueNumber) {
+    const candidate = await github(bundle, 'GET', `/repos/${bundle.dataRepo}/issues/${issueNumber}`).catch(() => null);
+    if (isOurs(candidate, issueTitle(profile, month))) {
+      store.set(issueCacheKey(bundle, profile, month), candidate.number); // so the save below replaces it
+      issue = candidate;
+    }
+  }
+  if (!issue) return false;
   await saveToGitHub(bundle, profile, username, {
     v: 1, employee: profile.name, month, savedAt: new Date().toISOString(), deleted: true, jobs: [], other: [],
   });

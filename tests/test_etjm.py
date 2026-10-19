@@ -651,6 +651,13 @@ class ZeroHourJobTests(unittest.TestCase):
         self.assertEqual(rows["JOB000011"][5] or "", "")  # nothing wrong with a job that has no hours
         self.assertEqual(rows["JOB000099"][5], "Not an open job")
         self.assertFalse(any("JOB000011" in c or "JOB000099" in c for c in checks["2026-09"]))
+        # ...and a second copy without them, for the Admin page's "Include jobs with no hours" off
+        short = next(n for n in files if n.endswith("(only jobs with hours).xlsx"))
+        self.assertEqual(short, name[:-5] + " (only jobs with hours).xlsx")
+        ws = openpyxl.load_workbook(io.BytesIO(files[short])).active
+        self.assertEqual([r[0] for r in ws.iter_rows(values_only=True) if r and str(r[0] or "").startswith("JOB")], ["JOB000010"])
+        readme = files[next(n for n in files if n.endswith("README.md"))].decode()
+        self.assertNotIn("only jobs with hours", readme)
 
 
 
