@@ -679,7 +679,8 @@ class Timesheet:
             entry = jobs.setdefault(line.job, {
                 "job": line.job, "location": line.location, "owner": line.owner,
                 "description": line.description, "hours": {}})
-            entry["hours"][line.task] = hours(line.hours)
+            if line.task:  # a job with no hours has no CAPEX/REVEX line
+                entry["hours"][line.task] = hours(line.hours)
         return {
             "v": 1,
             "employee": self.employee,
@@ -733,6 +734,14 @@ def parse_timesheet(data) -> Timesheet:
         hours_by_task = raw.get("hours") or {}
         if not isinstance(hours_by_task, dict):
             raise TimesheetError(f"Hours for {job} are not in the expected format.")
+        if not hours_by_task and not any(key[0] == job for key in lines):
+            # A job with no hours (yet): kept, so it stays on the timesheet and in the workbook.
+            lines[(job, "")] = JobLine(
+                job=job, task="",
+                location=clean_text(raw.get("location"))[:20],
+                owner=clean_text(raw.get("owner"))[:20],
+                description=clean_text(raw.get("description"))[:200],
+                hours={})
         for task, raw_hours in hours_by_task.items():
             task = clean_text(task).upper()
             if task not in TASKS:
@@ -749,6 +758,8 @@ def parse_timesheet(data) -> Timesheet:
             else:  # the same job twice: add the hours together
                 for day, value in hours.items():
                     line.hours[day] = line.hours.get(day, Decimal(0)) + value
+    for key in [k for k in lines if not k[1] and any(other[0] == k[0] and other[1] for other in lines)]:
+        del lines[key]  # the job also has CAPEX or REVEX lines, so it needs no line of its own
 
     other: list[OtherLine] = []
     for raw in raw_other:

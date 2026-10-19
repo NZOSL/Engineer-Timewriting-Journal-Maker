@@ -610,5 +610,48 @@ class SettingsTests(unittest.TestCase):
                 load_settings(path)
 
 
+
+class ZeroHourJobTests(unittest.TestCase):
+    """Jobs with no hours stay on the timesheet and in the workbook, but not in the journal."""
+
+    def test_kept_round_tripped_and_left_out_of_the_journal(self):
+        data = sheet(jobs=[
+            {"job": "JOB000010", "location": "SE", "owner": "30", "description": "Tank repaint", "hours": {"REVEX": {"1": 2}}},
+            {"job": "JOB000011", "location": "DU", "owner": "80", "description": "No hours yet", "hours": {}},
+            {"job": "JOB000012", "description": "Empty CAPEX line", "hours": {"CAPEX": {}}},
+            {"job": "JOB000013", "description": "Listed twice", "hours": {}},
+            {"job": "JOB000013", "description": "Listed twice", "hours": {"REVEX": {"2": 1}}},
+        ])
+        ts = parse_timesheet(data)
+        self.assertEqual([(line.job, line.task, line.total) for line in ts.jobs],
+                         [("JOB000010", "REVEX", 2), ("JOB000011", "", 0), ("JOB000012", "CAPEX", 0), ("JOB000013", "REVEX", 1)])
+        again = parse_timesheet(ts.to_json())  # the verified copy keeps them too
+        self.assertEqual([(line.job, line.task) for line in again.jobs], [(line.job, line.task) for line in ts.jobs])
+        self.assertEqual(ts.to_json()["jobs"][1]["hours"], {})
+        ts.username = "ann.example"
+        lines, _ = build_journal([ts], settings(), 2026, 9)
+        self.assertEqual([line.project for line in lines if line.project], ["JOB000010", "JOB000013"])
+
+    def test_the_workbook_lists_them(self):
+        import openpyxl
+
+        timesheets, _ = collected([sheet(jobs=[
+            {"job": "JOB000010", "hours": {"REVEX": {"1": 2}}},
+            {"job": "JOB000011", "description": "No hours yet", "hours": {}},
+            {"job": "JOB000099", "description": "Closed job", "hours": {}},
+        ])])
+        jobs_index = {"JOB000010": {"no": "JOB000010", "desc": "Tank repaint", "loc": "SE", "owner": "30", "tasks": ["REVEX"]},
+                      "JOB000011": {"no": "JOB000011", "desc": "No hours yet", "loc": "DU", "owner": "80", "tasks": ["CAPEX", "REVEX"]}}
+        files, checks = build_all(timesheets, settings(), jobs_index)
+        name = next(n for n in files if "Engineer timewriting" in n)
+        ws = openpyxl.load_workbook(io.BytesIO(files[name])).active
+        rows = {r[0]: r for r in ws.iter_rows(values_only=True) if r and str(r[0] or "").startswith("JOB")}
+        self.assertEqual(set(rows), {"JOB000010", "JOB000011", "JOB000099"})
+        self.assertEqual(rows["JOB000011"][4], "CAPEX/REVEX")  # what it's open for
+        self.assertEqual(rows["JOB000011"][5] or "", "")  # nothing wrong with a job that has no hours
+        self.assertEqual(rows["JOB000099"][5], "Not an open job")
+        self.assertFalse(any("JOB000011" in c or "JOB000099" in c for c in checks["2026-09"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -257,18 +257,19 @@ def engineer_xlsx(ts: Timesheet, jobs_index: dict, created: dt.datetime) -> byte
     rows = []  # (cells A..F, hours dict)
     for line in ts.other:
         rows.append((["N/A", "N/A", "N/A", line.label, "", ""], line.hours))
-    for line in ts.jobs:
+    for line in ts.jobs:  # including jobs with no hours, as in the engineers' own spreadsheet
         info = jobs_index.get(line.job)
         check = ""
         if jobs_index:
             if info is None:
                 check = "Not an open job"
-            elif line.task not in info["tasks"]:
+            elif line.total > 0 and line.task not in info["tasks"]:
                 check = f"{line.task} not open"
         location = line.location or (info or {}).get("loc", "")
         owner = line.owner or (info or {}).get("owner", "")
         description = line.description or (info or {}).get("desc", "")
-        rows.append(([line.job, location, owner, description, line.task, check], line.hours))
+        task = line.task or "/".join((info or {}).get("tasks") or [])  # no hours: what the job is open for
+        rows.append(([line.job, location, owner, description, task, check], line.hours))
 
     top = 5  # first data row (0-based), Excel row 6
     for i, (cells, hours) in enumerate(rows):
