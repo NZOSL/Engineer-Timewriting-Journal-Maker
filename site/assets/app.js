@@ -21,17 +21,18 @@ const REMEMBER_DAYS = 30;
 const KEYS = {
   session: 'etjm.session.v4',
   lastName: 'etjm.lastName.v1',
-  draft: 'etjm.draft.v2.',
-  issue: 'etjm.issue.v2.',
+  draft: 'etjm.draft.v3.',
+  issue: 'etjm.issue.v3.',
 };
 
 // Timesheet copies kept by earlier versions of the site (from testing, before the data was
-// started again on 18 Oct 2026) are deleted, so nobody sees months the office no longer has.
+// started again from September on 18 and 19 Oct 2026) are deleted, so nobody sees months the
+// office no longer has.
 try {
   const old = [];
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i);
-    if (/^etjm\.(draft|issue)\.v1\./.test(key || '')) old.push(key);
+    if (/^etjm\.(draft|issue)\.v[12]\./.test(key || '')) old.push(key);
   }
   old.forEach((key) => localStorage.removeItem(key));
 } catch {
