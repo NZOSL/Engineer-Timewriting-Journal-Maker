@@ -33,7 +33,7 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 
 ## Using the website
 
-1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Delete** one the office hasn't closed (it's taken out of the journal too). **New timesheet** starts another month, with the jobs and other-time rows of an earlier month (the latest, unless you pick another) or empty. Hold the eye next to the password box to see what you've typed. Forgot it? **Forgot your password?** emails you a link to choose a new one (if the office has your email address).
+1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Delete** one the office hasn't closed (it's taken out of the journal too). **New timesheet** starts another month, empty or with **Copy job template from** an earlier month (the latest, unless you pick another): its jobs and other-time rows, without the hours. Hold the eye next to the password box to see what you've typed. Forgot it? **Forgot your password?** emails you a link to choose a new one (if the office has your email address).
 2. Type a job number (`9683`, `J9683` or `JOB009683`) in **Add a job**. Location, owner and description fill in from the job list and can be edited. The job gets a CAPEX line, a REVEX line or both, depending on which tasks are open in Business Central.
 3. Type hours into the days. Blank means 0. `7.5`, `7,5` and `7:30` all work. Arrow keys and Enter move between cells, and you can paste a block straight from Excel.
 4. Add leave, general time and other non-job rows under **Other time**. These are recorded in your engineer workbook, not the journal.
