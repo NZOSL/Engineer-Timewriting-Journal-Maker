@@ -1,20 +1,22 @@
-// "My timesheets": the signed-in person's months, saved to the office or kept on
-// this computer. Open one to change it, or reuse one to start another month.
+// "My timesheets": the signed-in person's months, saved to the office or kept on this
+// computer. Open one to change it, delete one the office hasn't closed, or start a new one,
+// with the jobs and other-time rows from an earlier month if they like.
 // With ?as=<username>, an admin sees that engineer's page instead, read-only (see
 // openViewAs in app.js).
 
 import {
-  $, el, loadSession, clearSession, openSession, listSaved, drafts, sheetTotals, monthInfo, shiftMonth, thisMonth,
-  fmtHours, fmtDateTime, viewAsParam, openViewAs,
+  $, el, toast, loadSession, clearSession, openSession, listSaved, deleteSaved, drafts, sheetTotals, monthInfo,
+  shiftMonth, thisMonth, fmtHours, fmtDateTime, viewAsParam, openViewAs,
 } from './app.js';
 
 const session = loadSession();
 if (!session?.uk) location.replace('index.html');
 
 const viewing = viewAsParam();
-const state = { bundle: null, canSave: false, sheets: new Map(), loadError: null, viewAs: null };
+const state = { bundle: null, profile: null, canSave: false, sheets: new Map(), loadError: null, viewAs: null };
 const open = (month, copyFrom) => `timesheet.html?month=${month}${copyFrom ? `&copyFrom=${copyFrom}` : ''}${
   state.viewAs ? `&as=${encodeURIComponent(state.viewAs.person.username)}` : ''}`;
+const isClosed = (month) => (state.bundle?.closedMonths || []).includes(month);
 
 function hasRows(data) {
   return Boolean(data?.jobs?.length || data?.other?.length);
@@ -50,7 +52,7 @@ function collect(saved, { complete = false } = {}) {
     if (localNewer && state.canSave) sheet.status = { tone: 'warn', text: 'Unsaved changes on this computer' };
     else if (remote || local?.meta?.savedAt) sheet.status = { tone: 'ok', text: `Saved ${fmtDateTime(remote?.savedAt || local?.meta?.savedAt)}` };
     else sheet.status = { tone: 'muted', text: state.canSave ? 'Not saved yet' : 'On this computer' };
-    if ((state.bundle?.closedMonths || []).includes(sheet.month)) sheet.status = { tone: 'muted', text: 'Closed by the office' };
+    if (isClosed(sheet.month)) sheet.status = { tone: 'muted', text: 'Closed by the office' };
   }
   return sheets;
 }
@@ -59,10 +61,9 @@ function collect(saved, { complete = false } = {}) {
 function collectViewed() {
   const sheets = new Map();
   for (const [month, item] of state.viewAs.months) {
-    const closed = (state.bundle?.closedMonths || []).includes(month);
     sheets.set(month, {
       month, data: item.data, totals: sheetTotals(item.data),
-      status: closed ? { tone: 'muted', text: 'Closed by the office' } : { tone: 'ok', text: `Saved ${fmtDateTime(item.savedAt)}` },
+      status: isClosed(month) ? { tone: 'muted', text: 'Closed by the office' } : { tone: 'ok', text: `Saved ${fmtDateTime(item.savedAt)}` },
     });
   }
   return sheets;
@@ -74,7 +75,7 @@ function showViewing() {
   document.title = `${person.name}’s timesheets (view only) · Engineer Timewriting`;
   document.body.classList.add('viewing-as');
   $('#all-sheets').textContent = `${first}’s timesheets`;
-  $('#all-sheets').nextElementSibling.textContent = `What ${first} sees on My timesheets. Open a month to see their hours. Nothing here can be changed.`;
+  $('#sheets-hint').textContent = `What ${first} sees on My timesheets. Open a month to see their hours. Nothing here can be changed.`;
   $('#notices').replaceChildren(el('div', { class: 'notice notice-view' },
     el('div', { class: 'notice-text' }, el('strong', {}, `Viewing ${person.name}’s timesheets, read-only. `),
       `This is what they see, from the months they’ve saved${person.active ? '' : ' (they’ve left, so they can’t sign in)'}. `
@@ -82,43 +83,31 @@ function showViewing() {
     el('a', { class: 'btn btn-sm', href: 'admin.html' }, 'Back to Admin')));
 }
 
+// ------------------------------------------------------------- the list
+
 function render() {
-  const current = thisMonth();
-  const info = monthInfo(current);
-  const sheet = state.sheets.get(current);
   const months = [...state.sheets.keys()].sort().reverse();
-  const before = months.find((m) => m < current);
-
-  $('#this-month').textContent = info.label;
-  $('#this-status').replaceChildren(sheet
-    ? el('span', {}, el('span', { class: `chip chip-${sheet.status.tone}` }, sheet.status.text),
-      ` Jobs ${fmtHours(sheet.totals.jobs)} h · Other ${fmtHours(sheet.totals.other)} h`)
-    : el('span', {}, 'Not started yet.'));
-  $('#hero-actions').replaceChildren(...(state.viewAs
-    ? [sheet && el('a', { class: 'btn btn-primary', href: open(current) }, `View ${info.label}`)]
-    : [
-      el('a', { class: 'btn btn-primary', href: open(current) }, sheet ? `Open ${info.label}` : `Start ${info.label}`),
-      !sheet && before && el('a', { class: 'btn', href: open(current, before) }, `Start from ${monthInfo(before).label}`),
-    ]).filter(Boolean));
-
   const body = $('#sheets');
   if (!months.length) {
     body.replaceChildren(el('p', { class: 'muted pad' }, state.viewAs ? 'They haven’t saved any timesheets yet.'
-      : state.loadError ? 'Nothing on this computer yet.' : 'No timesheets yet. Start this month above.'));
+      : state.loadError ? 'Nothing on this computer yet.' : 'No timesheets yet. Press New timesheet to start one.'));
     return;
   }
   const rows = months.map((month) => {
     const item = state.sheets.get(month);
+    const label = monthInfo(month).label;
+    const actions = state.viewAs
+      ? [el('a', { class: 'btn btn-sm', href: open(month) }, 'View')]
+      : [el('a', { class: 'btn btn-sm', href: open(month) }, 'Open'),
+        !isClosed(month) && el('button', { class: 'btn btn-sm btn-danger-ghost', type: 'button', 'aria-label': `Delete ${label}`,
+          onclick: (e) => confirmDelete(e.currentTarget, month) }, 'Delete')];
     return el('tr', { dataset: { month } },
-      el('th', { scope: 'row' }, el('a', { href: open(month) }, monthInfo(month).label),
+      el('th', { scope: 'row' }, el('a', { href: open(month) }, label),
         el('span', { class: `status-inline chip chip-${item.status.tone}` }, item.status.text)),
       el('td', {}, el('span', { class: `chip chip-${item.status.tone}` }, item.status.text)),
       el('td', { class: 'num' }, fmtHours(item.totals.jobs)),
       el('td', { class: 'num' }, fmtHours(item.totals.other)),
-      el('td', { class: 'row-actions' }, ...(state.viewAs
-        ? [el('a', { class: 'btn btn-sm', href: open(month) }, 'View')]
-        : [el('a', { class: 'btn btn-sm', href: open(month) }, 'Open'),
-          el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showReuse(e.currentTarget, month) }, 'Reuse…')])));
+      el('td', { class: 'row-actions' }, ...actions.filter(Boolean)));
   });
   body.replaceChildren(el('table', { class: 'sheets' },
     el('thead', {}, el('tr', {},
@@ -128,28 +117,108 @@ function render() {
     el('tbody', {}, rows)));
 }
 
-// Pick which month to start from this sheet; the hours themselves aren't copied.
-function showReuse(button, source) {
-  document.querySelector('tr.reuse-row')?.remove();
+// ------------------------------------------------------------ deleting
+
+// Asked in the row itself, so it's clear which month goes.
+function confirmDelete(button, month) {
+  document.querySelector('tr.confirm-row')?.remove();
   const row = button.closest('tr');
-  const current = thisMonth();
-  const last = shiftMonth(current, 2);
-  const options = [];
-  for (let m = shiftMonth(source, 1); m <= last; m = shiftMonth(m, 1)) options.push(m);
-  if (!options.length) options.push(shiftMonth(source, 1));
-  const select = el('select', { class: 'reuse-select', 'aria-label': 'Month to start' },
-    options.map((m) => el('option', { value: m, selected: m === shiftMonth(source, 1) },
-      `${monthInfo(m).label}${state.sheets.has(m) ? ' (add to it)' : ''}`)));
-  const panel = el('tr', { class: 'reuse-row' }, el('td', { colspan: 5 },
-    el('div', { class: 'reuse-panel' },
-      el('span', {}, `Start `), select,
-      el('span', {}, ` with the jobs and other-time rows from ${monthInfo(source).label}.`),
-      el('a', { class: 'btn btn-primary btn-sm', href: open(options[0], source), id: 'reuse-go' }, 'Start'),
-      el('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => panel.remove() }, 'Cancel'))));
-  select.addEventListener('change', () => { $('#reuse-go').href = open(select.value, source); });
+  const label = monthInfo(month).label;
+  const sheet = state.sheets.get(month);
+  const go = el('button', { class: 'btn btn-sm btn-danger', type: 'button' }, `Delete ${label}`);
+  const cancel = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => panel.remove() }, 'Cancel');
+  const panel = el('tr', { class: 'confirm-row' }, el('td', { colspan: 5 },
+    el('div', { class: 'confirm-panel', role: 'alertdialog', 'aria-label': `Delete ${label}?` },
+      el('span', {}, el('strong', {}, `Delete ${label}? `), sheet.saved
+        ? 'Its hours are taken out of the office’s journal and workbooks too. This can’t be undone.'
+        : 'It’s only on this computer, so it’s simply removed. This can’t be undone.'),
+      el('span', { class: 'confirm-actions' }, go, cancel))));
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    cancel.disabled = true;
+    go.textContent = 'Deleting…';
+    try {
+      const wasSaved = sheet.saved ? await deleteSaved(state.bundle, state.profile, session.username, month) : false;
+      drafts.remove(session.username, month);
+      state.sheets.delete(month);
+      render();
+      toast(wasSaved ? `Deleted ${label}. The journal updates in about a minute.` : `Deleted ${label}.`, { tone: 'ok' });
+    } catch (error) {
+      go.disabled = false;
+      cancel.disabled = false;
+      go.textContent = `Delete ${label}`;
+      toast(error.message || 'Deleting didn’t work. Try again in a minute.', { tone: 'error', duration: 9000 });
+    }
+  });
   row.after(panel);
-  select.focus();
+  cancel.focus();
 }
+
+// -------------------------------------------------------- a new timesheet
+
+// Months that can be started: the last year and the next two months, except ones that
+// already have a timesheet or are closed.
+function startableMonths() {
+  const current = thisMonth();
+  const out = [];
+  for (let m = shiftMonth(current, 2); m >= shiftMonth(current, -12); m = shiftMonth(m, -1)) {
+    if (!state.sheets.has(m) && !isClosed(m)) out.push(m);
+  }
+  return out; // newest first
+}
+
+function showNewPanel() {
+  const panel = $('#new-panel');
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+  const current = thisMonth();
+  const months = startableMonths();
+  const sources = [...state.sheets.keys()].filter((m) => hasRows(state.sheets.get(m).data)).sort().reverse();
+  if (!months.length) {
+    panel.replaceChildren(el('p', { class: 'muted' }, 'Every month from the last year to two months ahead already has a timesheet.'));
+    panel.hidden = false;
+    return;
+  }
+  // This month if it hasn't been started, otherwise the next free month (or the latest earlier one).
+  const pick = months.includes(current) ? current : (months.filter((m) => m > current).pop() || months[0]);
+  const monthSelect = el('select', { id: 'new-month', class: 'reuse-select' },
+    months.map((m) => el('option', { value: m, selected: m === pick }, monthInfo(m).label)));
+  const reuse = el('input', { type: 'radio', name: 'start-with', value: 'reuse', checked: sources.length > 0, disabled: !sources.length });
+  const empty = el('input', { type: 'radio', name: 'start-with', value: 'empty', checked: !sources.length });
+  const sourceSelect = el('select', { id: 'new-source', class: 'reuse-select', disabled: !sources.length, 'aria-label': 'Month to reuse' },
+    sources.map((m) => el('option', { value: m }, monthInfo(m).label)));
+  let sourceTouched = false;
+  const defaultSource = () => {
+    if (sourceTouched || !sources.length) return;
+    sourceSelect.value = sources.find((m) => m < monthSelect.value) || sources[0]; // the latest month before it
+  };
+  defaultSource();
+  monthSelect.addEventListener('change', defaultSource);
+  sourceSelect.addEventListener('change', () => {
+    sourceTouched = true;
+    reuse.checked = true;
+  });
+  const startButton = el('button', { class: 'btn btn-primary', type: 'button', onclick: () => {
+    location.href = open(monthSelect.value, reuse.checked && sourceSelect.value ? sourceSelect.value : null);
+  } }, 'Start timesheet');
+  panel.replaceChildren(
+    el('div', { class: 'new-grid' },
+      el('label', { class: 'new-field' }, el('span', {}, 'Month'), monthSelect),
+      el('fieldset', { class: 'new-choice' },
+        el('legend', {}, 'Start with'),
+        el('label', { class: 'check' }, reuse, ' The jobs and other-time rows from ', sourceSelect,
+          el('span', { class: 'muted' }, ' (not the hours)')),
+        sources.length ? null : el('p', { class: 'muted small' }, 'Nothing to reuse yet: your first timesheet starts empty.'),
+        el('label', { class: 'check' }, empty, ' An empty timesheet'))),
+    el('div', { class: 'new-actions' }, startButton,
+      el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { panel.hidden = true; } }, 'Cancel')));
+  panel.hidden = false;
+  monthSelect.focus();
+}
+
+// ----------------------------------------------------------------- start
 
 function notice(tone, text) {
   $('#notices').replaceChildren(el('div', { class: `notice notice-${tone}` }, el('div', { class: 'notice-text' }, text)));
@@ -196,6 +265,8 @@ async function start() {
     ? new Date(`${state.bundle.jobsUpdated}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })
     : '';
   $('#meta').textContent = `${state.bundle.jobs.length} open jobs from “${state.bundle.jobsSource}”${updated ? `, updated ${updated}` : ''}.`;
+  $('#new-sheet').hidden = false;
+  $('#new-sheet').addEventListener('click', showNewPanel);
   state.sheets = collect([]);
   render();
   if (!state.canSave) {

@@ -562,8 +562,30 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 
 .sheets-card { padding: 0; overflow: hidden; }
 .sheets-head { padding: 20px 24px 12px; }
-.sheets-head h2 { margin: 0 0 4px; font-size: 17px; }
+.sheets-head h1, .sheets-head h2 { margin: 0 0 4px; font-size: 17px; }
 .sheets-head p { margin: 0; }
+.sheets-head-actions { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.sheets-head-actions > div { flex: 1 1 320px; }
+.sheets-head-actions h1 { font-size: 20px; letter-spacing: -0.01em; }
+
+/* New timesheet */
+.new-panel { margin: 0 24px 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--info-bg); display: grid; gap: 14px; }
+.new-grid { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: flex-start; }
+.new-field { display: grid; gap: 6px; font-weight: 600; }
+.new-field select { height: 34px; min-width: 180px; }
+.new-choice { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; }
+.new-choice legend { padding: 0; margin-bottom: 6px; font-weight: 600; }
+.new-choice .check { color: var(--text); flex-wrap: wrap; }
+.new-choice .small { margin: -4px 0 0 24px; font-size: 13px; }
+.new-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Deleting a month */
+.btn-danger { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+.btn-danger:hover { filter: brightness(0.92); }
+.btn-danger-ghost { color: var(--danger); }
+.confirm-row td { padding: 12px 24px; background: var(--danger-bg); border-top: 0; }
+.confirm-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.confirm-actions { display: flex; gap: 8px; }
 .pad { margin: 0; padding: 4px 24px 24px; }
 .sheets { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .sheets th, .sheets td { padding: 11px 24px; border-top: 1px solid var(--line); text-align: left; font-weight: 400; }
@@ -760,6 +782,8 @@ html.framed body { display: none !important; }
   .row-actions .btn { display: flex; width: 100%; padding: 0 10px; }
   .row-actions .btn + .btn { margin: 6px 0 0; }
   .reuse-row td { padding: 12px; }
+  .confirm-row td { padding: 12px; }
+  .new-panel { margin: 0 12px 12px; }
   .topbar-title { display: none; }
   .card-head { padding: 16px 16px 4px; }
   .card-body { padding: 12px 16px 16px; }

@@ -651,6 +651,7 @@ class Timesheet:
     other: list[OtherLine] = field(default_factory=list)
     issue: int | None = None
     updated_at: str = ""
+    deleted: bool = False  # the engineer deleted this month: no journal lines or workbook
 
     @property
     def month_key(self) -> str:
@@ -688,6 +689,7 @@ class Timesheet:
             "month": self.month_key,
             "savedAt": self.saved_at,
             "issue": self.issue,
+            **({"deleted": True} if self.deleted else {}),
             "jobs": list(jobs.values()),
             "other": [{"label": o.label, "hours": hours(o.hours)} for o in self.other],
         }
@@ -770,6 +772,8 @@ def parse_timesheet(data) -> Timesheet:
             raise TimesheetError("An other-time row has no description.")
         other.append(OtherLine(label=label, hours=_day_hours(raw.get("hours"), days, label)))
 
+    if data.get("deleted") is True:  # deleted by its engineer; kept so older copies can't bring it back
+        return Timesheet(employee=employee, year=year, month=month, saved_at=saved_at, deleted=True)
     return Timesheet(employee=employee, year=year, month=month, saved_at=saved_at,
                      jobs=list(lines.values()), other=other)
 

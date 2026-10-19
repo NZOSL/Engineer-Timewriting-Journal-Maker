@@ -653,5 +653,61 @@ class ZeroHourJobTests(unittest.TestCase):
         self.assertFalse(any("JOB000011" in c or "JOB000099" in c for c in checks["2026-09"]))
 
 
+
+class DeletedMonthTests(unittest.TestCase):
+    """An engineer can delete a month that isn't closed; nobody else can, and old copies can't undo it."""
+
+    def mirror_after(self, issues, tags, mirror=None, closed=()):
+        found, warnings = collect_timesheets(issues, tags, mirror, set(closed))
+        files, checks = build_all(found, settings(closedMonths=list(closed)), {})
+        kept = {}
+        for name, content in files.items():
+            if name.startswith("timesheets/"):
+                data = json.loads(content)
+                ts = parse_timesheet(data)
+                ts.username = data["username"]
+                kept[(ts.username, ts.month_key)] = ts
+        return found, files, kept, warnings
+
+    def test_delete_then_replay_then_save_again(self):
+        keys, everyone, state = world()
+        tags = keys_by_tag(keys, state)
+        work = sheet(saved="2026-10-01T00:00:00Z", jobs=[{"job": "JOB000010", "hours": {"REVEX": {"1": 2}}}])
+        saved = ts_issue(1, keys, state, "ann.example", work)
+        _, files, mirror, _ = self.mirror_after([saved], tags)
+        self.assertTrue(any(n.startswith("output/2026-09/") for n in files))
+
+        gone = ts_issue(1, keys, state, "ann.example", {"v": 1, "employee": "Ann Example", "month": "2026-09",
+                                                         "savedAt": "2026-10-03T00:00:00Z", "deleted": True, "jobs": [], "other": []})
+        found, files, mirror, _ = self.mirror_after([gone], tags, mirror)
+        self.assertEqual([t.deleted for t in found], [True])
+        self.assertFalse(any(n.startswith("output/") for n in files))  # no journal lines, no workbook
+        self.assertTrue(mirror[("ann.example", "2026-09")].deleted)  # remembered
+
+        _, files, mirror, _ = self.mirror_after([saved], tags, mirror)  # the older copy put back
+        self.assertFalse(any(n.startswith("output/") for n in files))
+
+        again = ts_issue(1, keys, state, "ann.example", dict(work, savedAt="2026-10-04T00:00:00Z"))
+        _, files, mirror, _ = self.mirror_after([again], tags, mirror)
+        self.assertTrue(any(n.startswith("output/2026-09/") for n in files))
+        self.assertFalse(mirror[("ann.example", "2026-09")].deleted)
+
+    def test_nobody_else_can_delete_it_and_closed_months_stay(self):
+        keys, everyone, state = world()
+        tags = keys_by_tag(keys, state)
+        saved = ts_issue(1, keys, state, "ann.example", sheet(saved="2026-10-01T00:00:00Z", jobs=[{"job": "JOB000010", "hours": {"REVEX": {"1": 2}}}]))
+        _, _, mirror, _ = self.mirror_after([saved], tags)
+        deletion = {"v": 1, "employee": "Ann Example", "month": "2026-09", "savedAt": "2026-10-03T00:00:00Z", "deleted": True, "jobs": [], "other": []}
+        forged = ts_issue(2, keys, state, "ben.sample", deletion)  # Ben's key, Ann's title
+        forged["title"] = saved["title"]
+        found, files, _, warnings = self.mirror_after([forged], tags, mirror)
+        self.assertEqual([(t.username, t.deleted) for t in found], [("ann.example", False)])
+        self.assertTrue(any(n.startswith("output/2026-09/") for n in files))
+        self.assertEqual(len(warnings), 1)
+        mine = ts_issue(3, keys, state, "ann.example", deletion)
+        found, _, _, _ = self.mirror_after([mine], tags, mirror, closed=["2026-09"])
+        self.assertFalse(any(t.deleted for t in found))  # a closed month can't be deleted
+
+
 if __name__ == "__main__":
     unittest.main()

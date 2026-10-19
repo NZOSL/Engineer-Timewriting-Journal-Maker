@@ -33,11 +33,11 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 
 ## Using the website
 
-1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Reuse** one to start another month with the same jobs and other-time rows. Hold the eye next to the password box to see what you've typed. Forgot it? **Forgot your password?** emails you a link to choose a new one (if the office has your email address).
+1. Sign in with your username and password from the office. **My timesheets** lists your months. Open one to change it, or **Delete** one the office hasn't closed (it's taken out of the journal too). **New timesheet** starts another month, with the jobs and other-time rows of an earlier month (the latest, unless you pick another) or empty. Hold the eye next to the password box to see what you've typed. Forgot it? **Forgot your password?** emails you a link to choose a new one (if the office has your email address).
 2. Type a job number (`9683`, `J9683` or `JOB009683`) in **Add a job**. Location, owner and description fill in from the job list and can be edited. The job gets a CAPEX line, a REVEX line or both, depending on which tasks are open in Business Central.
 3. Type hours into the days. Blank means 0. `7.5`, `7,5` and `7:30` all work. Arrow keys and Enter move between cells, and you can paste a block straight from Excel.
 4. Add leave, general time and other non-job rows under **Other time**. These are recorded in your engineer workbook, not the journal.
-5. Press **Save** (or Ctrl+S). **Journal preview** shows your lines exactly as they'll appear in the journal: all twelve columns, the yellow ones from your timesheet, and the balancing line.
+5. Press **Save** (or Ctrl+S). Jobs with no hours are kept on your timesheet and in your workbook, but only hours go into the journal.
 6. **Settings** (top right) shows your account, lets you change your password to one only you know, and shows where password-reset emails go.
 
 **Admins** (listed under `admins` in the data repo's settings) sign in to the **Admin** page, where they can:
@@ -46,7 +46,7 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 - view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save);
 - **View** an engineer's pages as they see them, read-only (from their saved months; nothing can be changed or saved).
 
-Engineers can copy their jobs and other-time rows from any month they've saved (**Copy rows from…** on the timesheet, or **Reuse** on My timesheets). Closed months are read-only.
+Engineers can copy their jobs and other-time rows from any month they've saved (**Copy rows from…** on the timesheet, or **New timesheet** on My timesheets). Closed months are read-only and can't be deleted. In the Admin page's **View**, the office can also see each engineer's **Journal preview**.
 
 ## Repository layout
 

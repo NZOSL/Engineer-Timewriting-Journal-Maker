@@ -737,7 +737,7 @@ export async function openViewAs(bundle, profile, username) {
   const months = new Map();
   for (const file of files) {
     const month = JSON.parse(fromUtf8.decode(await repo.read(file.path)));
-    const theirs = (month.timesheets || []).find((t) => t.username === username);
+    const theirs = (month.timesheets || []).find((t) => t.username === username && !t.deleted);
     if (theirs && isMonth(month.month)) months.set(month.month, { month: month.month, savedAt: theirs.savedAt, data: theirs });
   }
   return { person: { name: employee.name, username, rate: employee.rechargeRate ?? null, active: employee.active !== false }, months };
@@ -819,16 +819,29 @@ export async function listSaved(bundle, profile, username) {
     const match = issue.title.trim().match(/^Timesheet (\d{4}-\d{2}) · ([0-9a-f]{16})$/);
     if (!match || match[2] !== profile.tag || byMonth.has(match[1]) || !isOurs(issue, issue.title.trim())) continue;
     const { data } = await readIssue(issue, profile, username, match[1]);
-    if (data) byMonth.set(match[1], { month: match[1], savedAt: data.savedAt, issue: issue.number, data });
+    if (data?.deleted) byMonth.set(match[1], null); // deleted by them: not listed
+    else if (data) byMonth.set(match[1], { month: match[1], savedAt: data.savedAt, issue: issue.number, data });
   }
-  return [...byMonth.values()];
+  return [...byMonth.values()].filter(Boolean);
 }
 
 export async function loadSaved(bundle, profile, username, month) {
   const issue = await findIssue(bundle, profile, month);
   if (!issue) return null;
   const opened = await readIssue(issue, profile, username, month);
+  if (opened.data?.deleted) return null;
   return { ...opened, issue };
+}
+
+// Delete a month that isn't closed. It's saved as an encrypted "deleted" copy, like any
+// save, so only its engineer can do it and an older copy can't bring it back; the journal
+// and workbooks then leave it out. Returns false if it was never saved to the office.
+export async function deleteSaved(bundle, profile, username, month) {
+  if (!(await findIssue(bundle, profile, month))) return false;
+  await saveToGitHub(bundle, profile, username, {
+    v: 1, employee: profile.name, month, savedAt: new Date().toISOString(), deleted: true, jobs: [], other: [],
+  });
+  return true;
 }
 
 export async function saveToGitHub(bundle, profile, username, data) {

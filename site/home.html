@@ -29,20 +29,15 @@
   <main class="home">
     <div id="notices" class="notices" aria-live="polite"></div>
 
-    <section class="card hero" aria-labelledby="this-month">
-      <div class="hero-text">
-        <p class="eyebrow">This month</p>
-        <h1 id="this-month">&nbsp;</h1>
-        <p id="this-status" class="hero-status muted">Loading…</p>
-      </div>
-      <div id="hero-actions" class="hero-actions"></div>
-    </section>
-
     <section class="card sheets-card" aria-labelledby="all-sheets">
-      <div class="sheets-head">
-        <h2 id="all-sheets">Your timesheets</h2>
-        <p class="muted">Open a month to change it. <strong>Reuse</strong> starts another month with the same jobs and other-time rows (without the hours).</p>
+      <div class="sheets-head sheets-head-actions">
+        <div>
+          <h1 id="all-sheets">Your timesheets</h1>
+          <p id="sheets-hint" class="muted">Open a month to fill in or change your hours. <strong>New timesheet</strong> starts another month, with the jobs and other-time rows from one you’ve done before if you like.</p>
+        </div>
+        <button id="new-sheet" class="btn btn-primary" type="button" hidden>New timesheet</button>
       </div>
+      <div id="new-panel" class="new-panel" hidden></div>
       <div id="sheets" class="sheets-body"><p class="muted pad">Loading…</p></div>
     </section>
 

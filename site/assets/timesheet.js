@@ -960,6 +960,7 @@ async function start() {
   $('#loading').hidden = true;
   wrap.hidden = false;
   $('#savebar').hidden = false;
+  $('#preview-btn').hidden = !state.viewAs; // engineers just Save; the office can preview the journal lines
   const params = new URLSearchParams(location.search);
   const requested = params.get('month');
   if (state.viewAs) showViewing();

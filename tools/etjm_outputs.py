@@ -444,11 +444,18 @@ def build_all(timesheets: list[Timesheet], settings: dict, jobs_index: dict):
     """
     closed = set(settings.get("closedMonths", []))
     by_month: dict[tuple[int, int], list[Timesheet]] = {}
-    for ts in timesheets:
-        if ts.month_key not in closed:
-            by_month.setdefault((ts.year, ts.month), []).append(ts)
     files: dict[str, bytes] = {}
     checks: dict[str, list[str]] = {}
+    for ts in timesheets:
+        if ts.month_key in closed:
+            continue
+        if ts.deleted:
+            # Deleted by its engineer: no journal lines or workbook, but the verified copies
+            # remember it, so an older save can't bring it back.
+            files[f"timesheets/{ts.month_key}/{ts.username or slugify(ts.employee)}.json"] = (
+                json.dumps(ts.to_json(), indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+            continue
+        by_month.setdefault((ts.year, ts.month), []).append(ts)
     for (year, month), group in sorted(by_month.items()):
         month_files, month_checks = build_month(group, settings, jobs_index, year, month)
         files.update(month_files)
