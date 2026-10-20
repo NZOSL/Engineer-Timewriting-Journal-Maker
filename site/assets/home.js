@@ -160,12 +160,12 @@ function confirmDelete(button, month) {
 
 // -------------------------------------------------------- a new timesheet
 
-// Months that can be started: the last year and the next two months, except ones that
-// already have a timesheet or are closed.
+// Months that can be started: this month and the next two, except ones that already have
+// a timesheet or are closed.
 function startableMonths() {
   const current = thisMonth();
   const out = [];
-  for (let m = shiftMonth(current, 2); m >= shiftMonth(current, -12); m = shiftMonth(m, -1)) {
+  for (let m = shiftMonth(current, 2); m >= current; m = shiftMonth(m, -1)) {
     if (!state.sheets.has(m) && !isClosed(m)) out.push(m);
   }
   return out; // newest first
@@ -181,7 +181,7 @@ function showNewPanel() {
   const months = startableMonths();
   const sources = [...state.sheets.keys()].filter((m) => hasRows(state.sheets.get(m).data)).sort().reverse();
   if (!months.length) {
-    panel.replaceChildren(el('p', { class: 'muted' }, 'Every month from the last year to two months ahead already has a timesheet.'));
+    panel.replaceChildren(el('p', { class: 'muted' }, 'This month and the next two already have timesheets. Open one of them below.'));
     panel.hidden = false;
     return;
   }
