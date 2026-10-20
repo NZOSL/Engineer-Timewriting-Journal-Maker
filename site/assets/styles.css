@@ -699,7 +699,8 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .staff-status[data-tone="ok"] { color: var(--ok); }
 
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.copy-select { height: 26px; max-width: 190px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font-size: 12.5px; font-weight: 400; cursor: pointer; }
+.job-filter { flex: 1; min-width: 0; max-width: 300px; height: 28px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font: inherit; font-weight: 400; font-size: 13px; }
+.job-filter:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
 .readonly .adder-row, .readonly .remove-row { display: none; }
 .readonly .cell, .readonly .detail { cursor: default; }
 
@@ -760,9 +761,12 @@ html.framed body { display: none !important; }
   .facts div { grid-template-columns: 1fr; gap: 2px; }
   .settings-card { padding: 18px 16px 20px; }
   :root { --w-label: 150px; --w-type: 68px; --w-total: 48px; --w-day: 42px; }
-  .topbar { grid-template-columns: auto 1fr auto; height: 56px; padding: 0 8px; gap: 4px; }
+  /* On a phone the buttons go to a second line when they don't fit beside the month. */
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; height: auto; min-height: 56px; padding: 6px 8px; gap: 4px 8px; }
+  .topbar > span:empty { display: none; }
   .brand span { display: none; }
-  .month-nav { justify-self: center; }
+  .month-nav { flex: 1; justify-content: center; }
+  .topbar .user { margin-left: auto; }
   .month-label { min-width: 0; font-size: 16px; }
   .user-name { display: none; }
   .app-main { padding: 10px; gap: 10px; }

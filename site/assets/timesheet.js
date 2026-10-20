@@ -20,7 +20,6 @@ const state = {
   viewAs: null, // { person, months } when an admin is looking at someone's timesheets
   bundle: null,
   profile: null,
-  sources: new Map(), // month -> { data, saved } that rows can be copied from
   jobs: new Map(),
   canSave: false,
   month: null,
@@ -33,6 +32,7 @@ const state = {
   loadId: 0,
   saving: false,
   loading: false,
+  jobFilter: '', // what's typed in the Jobs search box
 };
 let refs = {};
 let uidCount = 0;
@@ -285,7 +285,7 @@ function render() {
     el('td', { class: 'sticky-1 adder-cell', colspan: 3 }, otherAdder()), el('td', { class: 'adder-fill', colspan: days })));
 
   const jobBody = el('tbody', { class: 'section-jobs' },
-    sectionRow('Jobs', 'These hours go into the journal.'));
+    sectionRow('Jobs', null, jobFilterInput()));
   for (const row of state.draft.jobs) {
     const info = state.jobs.get(row.job);
     const tasks = tasksFor(row);
@@ -300,7 +300,7 @@ function render() {
           detailInput(row, 'owner', 'Owner', 'owner'),
           detailInput(row, 'description', 'Description', 'desc'))));
     if (!tasks.length) {
-      jobBody.append(el('tr', { class: 'line closed' }, label,
+      jobBody.append(el('tr', { class: 'line closed', dataset: { job: row.uid } }, label,
         el('td', { class: 'c-type sticky-2' }, '—'), el('td', { class: 'c-total sticky-3' }),
         el('td', { class: 'closed-note', colspan: days }, 'This job isn’t open any more. Remove it, or ask for it to be reopened.')));
       continue;
@@ -309,10 +309,12 @@ function render() {
       row.hours[task] ||= {};
       const listed = info?.tasks.includes(task);
       const pill = el('span', { class: `pill pill-${task.toLowerCase()}${listed ? '' : ' pill-problem'}`, title: listed ? '' : `${row.job} isn’t open for ${task}` }, task);
-      jobBody.append(lineRow(`j:${row.uid}:${task}`, row.hours[task], `${row.job} ${task}`, rowIndex, {
+      const tr = lineRow(`j:${row.uid}:${task}`, row.hours[task], `${row.job} ${task}`, rowIndex, {
         lead: i === 0 ? [label] : [],
         type: el('td', { class: 'c-type sticky-2' }, pill),
-      }));
+      });
+      tr.dataset.job = row.uid;
+      jobBody.append(tr);
       rowIndex += 1;
     });
   }
@@ -333,7 +335,8 @@ function render() {
   wrap.scrollTop = scroll.top;
   const locked = isReadOnly();
   wrap.classList.toggle('readonly', locked);
-  if (locked) wrap.querySelectorAll('input, select, button').forEach((node) => { node.disabled = true; });
+  if (locked) wrap.querySelectorAll('input:not(.job-filter), select, button').forEach((node) => { node.disabled = true; });
+  applyJobFilter();
   const closed = isClosed();
   setNotice('closed', closed ? {
     tone: 'info',
@@ -347,8 +350,42 @@ function render() {
 function sectionRow(title, hint, control) {
   return el('tr', { class: 'section-row' },
     el('th', { class: 'sticky-1 section-title', colspan: 3, scope: 'rowgroup' },
-      el('div', { class: 'section-head' }, el('span', {}, title, el('span', { class: 'section-hint' }, hint)), control)),
+      el('div', { class: 'section-head' }, el('span', {}, title, hint ? el('span', { class: 'section-hint' }, hint) : null), control)),
     el('td', { class: 'section-fill', colspan: state.info.days }));
+}
+
+// The search box in the Jobs header: shows only the jobs that match, to find one quickly.
+function jobFilterInput() {
+  return el('input', {
+    class: 'job-filter', type: 'search', placeholder: 'Search your jobs', value: state.jobFilter || '',
+    'aria-label': 'Search your jobs by number, location, owner or description', autocomplete: 'off', spellcheck: false,
+    oninput: (event) => {
+      state.jobFilter = event.currentTarget.value;
+      applyJobFilter();
+    },
+  });
+}
+
+// Every word typed must appear in the job's number (JOB009683, 9683, J9683; "J9683-DU-80" as in
+// the old spreadsheets also works), location, owner, description or CAPEX/REVEX.
+function applyJobFilter() {
+  const words = cleanText(state.jobFilter || '').toLowerCase().split(/[\s\-–—]+/).filter(Boolean);
+  let shown = 0;
+  for (const row of state.draft.jobs) {
+    const digits = row.job.replace(/^JOB0*/, '');
+    const text = `${row.job} job${digits} j${digits} ${row.location} ${row.owner} ${row.description} ${tasksFor(row).join(' ')}`.toLowerCase();
+    const match = words.every((word) => text.includes(word));
+    if (match) shown += 1;
+    document.querySelectorAll(`.section-jobs tr[data-job="${row.uid}"]`).forEach((tr) => { tr.hidden = !match; });
+  }
+  const body = document.querySelector('.section-jobs');
+  body?.querySelector('.filter-empty')?.remove();
+  if (body && words.length && !shown && state.draft.jobs.length) {
+    const adder = body.querySelector('.adder-row');
+    adder?.before(el('tr', { class: 'filter-empty' },
+      el('td', { class: 'sticky-1 empty-cell', colspan: 3 }, el('p', {}, `No jobs match “${state.jobFilter.trim()}”.`)),
+      el('td', { class: 'adder-fill', colspan: state.info.days })));
+  }
 }
 
 function emptyRow() {
@@ -441,9 +478,13 @@ function onGridBlur(event) {
 }
 
 function moveTo(input, rowStep, dayStep) {
-  const row = Number(input.dataset.r) + rowStep;
+  let row = Number(input.dataset.r) + rowStep;
   const day = Number(input.dataset.day) + dayStep;
-  const target = refs.cells.get(`${row}:${day}`);
+  let target = refs.cells.get(`${row}:${day}`);
+  while (target && rowStep && target.closest('tr').hidden) { // skip jobs hidden by the search
+    row += rowStep;
+    target = refs.cells.get(`${row}:${day}`);
+  }
   if (target) {
     target.focus();
     target.select();
@@ -481,9 +522,15 @@ function onGridPaste(event) {
   const rows = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map((line) => line.split('\t'));
   const startRow = Number(input.dataset.r);
   const startDay = Number(input.dataset.day);
+  // The rows on screen from this one down (the search may be hiding some).
+  const targets = [];
+  for (let r = startRow; targets.length < rows.length && r < (refs.rowCount || 0); r += 1) {
+    const first = refs.cells.get(`${r}:1`);
+    if (first && !first.closest('tr').hidden) targets.push(r);
+  }
   let bad = 0;
   rows.forEach((values, i) => values.forEach((value, j) => {
-    const cell = refs.cells.get(`${startRow + i}:${startDay + j}`);
+    const cell = targets[i] === undefined ? null : refs.cells.get(`${targets[i]}:${startDay + j}`);
     if (!cell) return;
     cell.value = value.trim();
     if (!setCell(cell, value)) bad += 1;
@@ -546,6 +593,10 @@ function flash(keyPrefix) {
 }
 
 function addJob(number) {
+  if (state.jobFilter) { // otherwise the job could be hidden by the search
+    state.jobFilter = '';
+    render();
+  }
   const existing = state.draft.jobs.find((row) => row.job === number);
   if (existing) {
     flash(`j:${existing.uid}:`);
@@ -693,12 +744,17 @@ function otherAdder() {
 // Copy another month's jobs and other-time rows (not the hours). Jobs that aren't open any
 // more are left out, unless `includeClosed` (New timesheet's "Also copy closed jobs").
 async function copyRows(source, { includeClosed = false } = {}) {
-  let data = state.sources.get(source)?.data || drafts.get(session.username, source)?.data;
-  if (!data?.jobs?.length && !data?.other?.length && state.canSave) {
+  // The newer of the copy on this computer and the office's saved copy (it may have been
+  // changed on another computer since).
+  const local = drafts.get(session.username, source);
+  let data = local?.data;
+  if (state.canSave) {
     try {
-      data = (await loadSaved(state.bundle, state.profile, session.username, source))?.data;
+      const saved = (await loadSaved(state.bundle, state.profile, session.username, source))?.data;
+      const localNewer = local?.meta?.dirty && (local.meta.localUpdatedAt || '') > (saved?.savedAt || '');
+      if (saved && !localNewer) data = saved;
     } catch {
-      data = null;
+      /* the copy on this computer, if there is one */
     }
   }
   if (!data?.jobs?.length && !data?.other?.length) {
@@ -773,7 +829,6 @@ async function save() {
   try {
     const issue = await saveToGitHub(state.bundle, state.profile, session.username, data);
     state.meta.savedAt = data.savedAt;
-    state.sources.set(data.month, { data, saved: true });
     state.meta.issue = issue.number;
     if (state.version === version) state.meta.dirty = false;
     persistLocal();
@@ -808,6 +863,7 @@ function showPreview() {
 
 async function openMonth(month) {
   persistLocal();
+  state.jobFilter = '';
   state.month = month;
   state.info = monthInfo(month);
   state.invalid.clear();
