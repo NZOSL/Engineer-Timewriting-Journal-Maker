@@ -285,7 +285,7 @@ function render() {
     el('td', { class: 'sticky-1 adder-cell', colspan: 3 }, otherAdder()), el('td', { class: 'adder-fill', colspan: days })));
 
   const jobBody = el('tbody', { class: 'section-jobs' },
-    sectionRow('Jobs', 'These hours go into the journal.', isReadOnly() ? null : copySelect()));
+    sectionRow('Jobs', 'These hours go into the journal.'));
   for (const row of state.draft.jobs) {
     const info = state.jobs.get(row.job);
     const tasks = tasksFor(row);
@@ -354,7 +354,7 @@ function sectionRow(title, hint, control) {
 function emptyRow() {
   return el('tr', { class: 'empty-row' },
     el('td', { class: 'sticky-1 empty-cell', colspan: 3 },
-      el('p', {}, isReadOnly() ? 'No jobs were saved for this month.' : 'No jobs yet. Type a job number below, or use “Copy rows from…” to start from a month you saved before.')),
+      el('p', {}, isReadOnly() ? 'No jobs were saved for this month.' : 'No jobs yet. Type a job number below.')),
     el('td', { class: 'adder-fill', colspan: state.info.days }));
 }
 
@@ -976,36 +976,6 @@ async function start() {
   if (state.viewAs) return;
   const source = params.get('copyFrom');
   if (isMonth(source) && source !== state.month) await copyRows(source, { includeClosed: params.get('closed') === '1' });
-  loadSources();
-}
-
-// Months this person can copy rows from: everything saved to the office, plus
-// months kept on this computer.
-async function loadSources() {
-  for (const month of drafts.months(session.username)) {
-    const data = drafts.get(session.username, month)?.data;
-    if (data?.jobs?.length || data?.other?.length) state.sources.set(month, { data, saved: false });
-  }
-  if (state.canSave) {
-    try {
-      for (const item of await listSaved(state.bundle, state.profile, session.username)) state.sources.set(item.month, { data: item.data, saved: true });
-    } catch {
-      /* the months on this computer are still offered */
-    }
-  }
-  render();
-}
-
-function copySelect() {
-  const months = [...state.sources.keys()].filter((m) => m !== state.month).sort().reverse();
-  const select = el('select', { class: 'copy-select', 'aria-label': 'Copy rows from another month' },
-    el('option', { value: '' }, months.length ? 'Copy rows from…' : 'No other months to copy yet'),
-    months.map((m) => el('option', { value: m }, `${monthInfo(m).label}${state.sources.get(m).saved ? '' : ' (this computer)'}`)));
-  select.disabled = !months.length;
-  select.addEventListener('change', () => {
-    if (select.value) copyRows(select.value);
-  });
-  return select;
 }
 
 function isClosed() {

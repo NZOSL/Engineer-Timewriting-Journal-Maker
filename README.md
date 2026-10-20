@@ -46,7 +46,7 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 - view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save);
 - **View** an engineer's pages as they see them, read-only (from their saved months; nothing can be changed or saved).
 
-Engineers can copy their jobs and other-time rows from any month they've saved (**Copy rows from…** on the timesheet, or **New timesheet** on My timesheets). Closed months are read-only and can't be deleted. In the Admin page's **View**, the office can also see each engineer's **Journal preview**.
+Engineers can copy their jobs and other-time rows from any month they've saved (**New timesheet** on My timesheets). Closed months are read-only and can't be deleted. In the Admin page's **View**, the office can also see each engineer's **Journal preview**.
 
 ## Repository layout
 
