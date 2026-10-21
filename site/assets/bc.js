@@ -10,7 +10,6 @@ const API = 'https://api.businesscentral.dynamics.com';
 const SCOPE = `${API}/Financials.ReadWrite.All offline_access openid profile`;
 const CHANNEL = 'etjm-microsoft';
 const MAX_BATCH = 100; // Business Central's limit on requests in one $batch
-const CHECK_ACCOUNT = 'ETJM-CHECK-ONLY'; // a G/L account that doesn't exist, to make a check fail on purpose
 
 export class BcError extends Error {
   constructor(message, { status = 0, signIn = false } = {}) {
@@ -284,47 +283,30 @@ function chunks(lines, size) {
 }
 
 // Add lines to the batch: [{ group, label, fields }] where fields are the journal page's
-// (Posting_Date, Document_No, Account_No, Amount, Job_No, …). Each chunk is one transaction;
-// if Business Central refuses a line, nothing in that chunk is saved and earlier chunks are
-// taken back out, and the error names the line. With check: true, each chunk ends with a line
-// Business Central has to refuse, so it checks every line and then saves none of them.
-// Returns { lineNos, saved } (the line numbers added, and what Business Central made of each line).
-export async function addLines(cfg, lines, { check = false } = {}) {
+// (Posting_Date, Document_No, Account_No, Amount, Job_No, …). Each chunk of up to 100 lines is
+// one transaction: if Business Central refuses a line, nothing in that chunk is kept, chunks
+// already sent are taken back out, and the error names the line. Returns { lineNos, saved }:
+// the line numbers added, and what Business Central made of each line.
+export async function addLines(cfg, lines) {
   const waiting = await batchLines(cfg);
   let lineNo = waiting.reduce((max, line) => Math.max(max, Number(line.Line_No) || 0), 0);
   const numbered = lines.map((line) => { lineNo += 10000; return { ...line, lineNo }; });
-  const post = (line, extra = {}) => ({
-    method: 'POST',
-    url: linesPath(cfg),
-    body: { Journal_Template_Name: cfg.template, Journal_Batch_Name: cfg.batch, Line_No: line.lineNo, ...line.fields, ...extra },
-  });
   const added = [];
   const saved = [];
   try {
-    for (const part of chunks(numbered, check ? MAX_BATCH - 1 : MAX_BATCH)) {
-      const requests = part.map((line) => post(line));
-      if (check) requests.push(post({ ...part[0], lineNo: lineNo + 10000 }, { Account_No: CHECK_ACCOUNT, Job_No: '', Job_Task_No: '' }));
-      let answers;
-      try {
-        answers = await batch(cfg, requests, { together: true });
-      } catch (error) {
-        // If Business Central reports the first refusal for the whole batch instead of line by
-        // line, and that's the line meant to fail, every real line was fine.
-        if (!check || !error.message.includes(CHECK_ACCOUNT)) throw error;
-        answers = [...part.map(() => ({ status: 201, body: {} })), { status: 400 }];
-      }
+    for (const part of chunks(numbered, MAX_BATCH)) {
+      const answers = await batch(cfg, part.map((line) => ({
+        method: 'POST',
+        url: linesPath(cfg),
+        body: { Journal_Template_Name: cfg.template, Journal_Batch_Name: cfg.batch, Line_No: line.lineNo, ...line.fields },
+      })), { together: true });
       const failed = answers.findIndex((a) => !(a.status >= 200 && a.status < 300));
-      if (failed >= 0 && failed < part.length) {
+      if (failed >= 0) {
         throw new BcError(`${part[failed].label}: ${bcMessage(answers[failed].body) || `Business Central answered ${answers[failed].status}.`}`,
           { status: answers[failed].status });
       }
+      added.push(...answers.map((a, i) => Number(a.body?.Line_No) || part[i].lineNo));
       part.forEach((line, i) => saved.push({ ...line, bc: answers[i].body || {} }));
-      if (check && failed < 0) {
-        // Business Central took even the line it should have refused: take everything back out.
-        added.push(...answers.map((a, i) => Number(a.body?.Line_No) || requests[i].body.Line_No));
-        throw new BcError('Business Central saved the lines while only checking them, so they’ve been taken back out. Try again.');
-      }
-      if (!check) added.push(...answers.map((a, i) => Number(a.body?.Line_No) || part[i].lineNo));
     }
   } catch (error) {
     if (added.length) await removeLines(cfg, added).catch(() => {});

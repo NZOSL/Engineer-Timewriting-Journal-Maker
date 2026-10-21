@@ -79,7 +79,7 @@ ones, and the epoch moves on, which signs out anyone who had the old password.
 
 ## Business Central
 
-**Send to BC** on the Admin page acts in Business Central as the person signed in, through
+**Sign in to Business Central** on the Admin page acts in Business Central as the person signed in, through
 Microsoft's own sign-in.
 
 * **Signing in** happens in a Microsoft pop-up, using the authorisation-code flow with PKCE
