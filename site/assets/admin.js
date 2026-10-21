@@ -270,6 +270,21 @@ function downloadAll(month, workbooks) {
   saveBlob(makeZip(workbooks), `Engineer timewriting - ${monthInfo(month).label}.zip`);
 }
 
+// Several months at once (the ticked ones, oldest first): one month's journal comes as its
+// CSV; more come as one .zip, as do the engineer workbooks.
+const monthsLabel = (chosen) => (chosen.length === 1 ? monthInfo(chosen[0].month).label
+  : `${monthInfo(chosen[0].month).label} to ${monthInfo(chosen[chosen.length - 1].month).label}`);
+
+function downloadJournals(chosen) {
+  const csvs = chosen.map((m) => m.csv).filter(Boolean);
+  if (csvs.length === 1) download(csvs[0]);
+  else saveBlob(makeZip(csvs), `Timewriting journals - ${monthsLabel(chosen)}.zip`);
+}
+
+function downloadWorkbooks(chosen) {
+  saveBlob(makeZip(chosen.flatMap((m) => m.workbooks.map(m.pick))), `Engineer timewriting - ${monthsLabel(chosen)}.zip`);
+}
+
 const TYPES = { csv: 'text/csv', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', md: 'text/markdown' };
 function download(file) {
   saveBlob(new Blob([file.data], { type: TYPES[file.name.split('.').pop()] || 'application/octet-stream' }), file.name);
@@ -320,6 +335,22 @@ function setUpEmptyJobsOption() {
   });
 }
 
+// The "Engineer workbooks" lists: one open at a time, closed by a click elsewhere or Escape.
+function setUpWorkbookMenus() {
+  const openMenus = () => [...document.querySelectorAll('details.workbooks[open]')];
+  document.addEventListener('toggle', (e) => {
+    if (!e.target.matches?.('details.workbooks') || !e.target.open) return;
+    openMenus().forEach((menu) => { if (menu !== e.target) menu.open = false; });
+  }, true);
+  document.addEventListener('pointerdown', (e) => {
+    openMenus().forEach((menu) => { if (!menu.contains(e.target)) menu.open = false; });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    openMenus().forEach((menu) => { menu.open = false; menu.querySelector('summary').focus(); });
+  });
+}
+
 async function loadJournals() {
   const box = $('#journals');
   try {
@@ -333,23 +364,67 @@ async function loadJournals() {
       box.replaceChildren(el('p', { class: 'muted' }, 'No journals yet. They appear here once engineers save their timesheets.'));
       return;
     }
-    const rows = months.map((month) => {
+    // What each month offers, newest first.
+    const list = months.map((month) => {
       const files = byMonth.get(month);
-      const csv = files.find((f) => f.name.endsWith('.csv'));
       // Each engineer's workbook, and (if they have jobs with no hours) a copy without those.
       const workbooks = files.filter((f) => f.name.startsWith('Engineer timewriting') && !f.name.endsWith(HOURS_ONLY));
       const pick = (f) => {
         const short = files.find((g) => g.name === f.name.replace(/\.xlsx$/, HOURS_ONLY));
         return includeEmptyJobs() || !short ? f : { name: f.name, data: short.data };
       };
-      const closed = (state.settings?.closedMonths || []).includes(month);
-      const tr = el('tr', {},
-        el('th', { scope: 'row' }, monthInfo(month).label,
-          closed ? el('span', { class: 'chip chip-muted chip-inline' }, 'Closed') : null,
-          el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)),
+      return { month, files, csv: files.find((f) => f.name.endsWith('.csv')), workbooks, pick,
+        closed: (state.settings?.closedMonths || []).includes(month) };
+    });
+
+    // Ticking months swaps each month's download buttons for "Download all" buttons under the list.
+    const selected = new Set();
+    const ticks = new Map();
+    const table = el('table', { class: 'sheets journals' });
+    const bulk = el('div', { class: 'bulk-bar', role: 'region', 'aria-label': 'Download the ticked months', hidden: true });
+    const allTick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': 'Tick every month' });
+    const refresh = () => {
+      const chosen = list.filter((m) => selected.has(m.month)).reverse(); // oldest first
+      table.classList.toggle('selecting', chosen.length > 0);
+      if (chosen.length) table.querySelectorAll('details.workbooks[open]').forEach((menu) => { menu.open = false; });
+      for (const [month, tick] of ticks) {
+        tick.checked = selected.has(month);
+        tick.closest('tr')?.classList.toggle('picked', tick.checked);
+      }
+      allTick.checked = chosen.length === list.length;
+      allTick.indeterminate = chosen.length > 0 && chosen.length < list.length;
+      bulk.hidden = !chosen.length;
+      if (!chosen.length) return;
+      const csvs = chosen.filter((m) => m.csv).length;
+      const workbooks = chosen.reduce((sum, m) => sum + m.workbooks.length, 0);
+      bulk.replaceChildren(
+        el('span', { class: 'bulk-count' }, `${chosen.length} month${chosen.length === 1 ? '' : 's'} ticked`),
+        el('button', { class: 'btn btn-primary', type: 'button', disabled: !csvs, onclick: () => downloadJournals(chosen) },
+          'Download all journal CSVs'),
+        el('button', { class: 'btn', type: 'button', disabled: !workbooks, onclick: () => downloadWorkbooks(chosen) },
+          'Download all engineer workbooks'),
+        el('button', { class: 'link-btn', type: 'button', onclick: () => { selected.clear(); refresh(); } }, 'Clear'));
+    };
+    allTick.addEventListener('change', () => {
+      if (allTick.checked) list.forEach((m) => selected.add(m.month));
+      else selected.clear();
+      refresh();
+    });
+
+    const rows = list.map(({ month, files, csv, workbooks, pick, closed }) => {
+      const tick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': `Tick ${monthInfo(month).label}`, onchange: (e) => {
+        if (e.currentTarget.checked) selected.add(month); else selected.delete(month);
+        refresh();
+      } });
+      ticks.set(month, tick);
+      return el('tr', {},
+        el('th', { scope: 'row' }, el('label', { class: 'month-pick' }, tick,
+          el('span', {}, monthInfo(month).label,
+            closed ? el('span', { class: 'chip chip-muted chip-inline' }, 'Closed') : null,
+            el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)))),
         el('td', { class: 'download-cell' },
           csv && el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV'),
-          workbooks.length ? el('details', { class: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
+          workbooks.length ? el('details', { class: 'workbooks', name: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
             el('div', { class: 'workbook-list' },
               workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,
               workbooks.map((f) => el('button', { class: 'link-btn', type: 'button', onclick: () => download(pick(f)) },
@@ -357,11 +432,14 @@ async function loadJournals() {
         el('td', { class: 'row-actions' },
           el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showJournal(e.currentTarget.closest('tr'), month, files) }, 'View'),
           el('button', { class: 'btn btn-sm', type: 'button', title: closed ? 'Let engineers change this month again' : 'Freeze this month once its journal is uploaded', onclick: (e) => setClosed(month, !closed, e.currentTarget) }, closed ? 'Reopen' : 'Close')));
-      return tr;
     });
-    box.replaceChildren(el('table', { class: 'sheets journals' },
-      el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, 'Month'), el('th', { scope: 'col' }, 'Download'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Actions')))),
-      el('tbody', {}, rows)));
+    table.replaceChildren(
+      el('thead', {}, el('tr', {},
+        el('th', { scope: 'col' }, el('label', { class: 'month-pick' }, allTick, el('span', {}, 'Month'))),
+        el('th', { scope: 'col' }, 'Download'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Actions')))),
+      el('tbody', {}, rows));
+    box.replaceChildren(table, bulk);
+    refresh();
   } catch (error) {
     box.replaceChildren(el('p', { class: 'form-message' }, error.message));
   }
@@ -738,6 +816,7 @@ async function start() {
   state.repo = adminRepo(state.bundle, state.profile);
   setUpUpload();
   setUpEmptyJobsOption();
+  setUpWorkbookMenus();
   try {
     await loadSettings();
   } catch (error) {

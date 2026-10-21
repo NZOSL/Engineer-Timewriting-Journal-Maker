@@ -654,6 +654,15 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .download-cell { white-space: nowrap; }
 .download-cell .btn, .workbooks > summary { white-space: nowrap; }
 .download-cell > * + * { margin-left: 6px; }
+/* Ticking months: their download buttons give way to "Download all" under the list */
+.month-pick { display: inline-flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.month-pick > span { min-width: 0; }
+.pick { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+.journals.selecting .download-cell > * { display: none; }
+.journals tr.picked th, .journals tr.picked td { background: var(--info-bg); }
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--info-bg); }
+.bulk-bar[hidden] { display: none; }
+.bulk-count { font-weight: 650; margin-right: auto; }
 .workbooks { position: relative; display: inline-block; }
 .workbooks > summary { list-style: none; }
 .workbooks > summary::-webkit-details-marker { display: none; }
@@ -740,7 +749,7 @@ html.framed body { display: none !important; }
 
 /* -------------------------------------------------------- admin: emails */
 
-#staff { overflow-x: auto; }
+#staff { overflow-x: auto; position: relative; } /* keeps the hidden screen-reader labels inside the scrolling box */
 .staff th, .staff td { padding-left: 12px; padding-right: 12px; }
 .email-input { width: 210px; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
 .email-input.invalid { border-color: var(--danger); }
