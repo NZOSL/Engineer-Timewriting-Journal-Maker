@@ -413,7 +413,7 @@ function renderJournals() {
     if (!chosen.length) return;
     const csvs = chosen.filter((m) => m.csv).length;
     const workbooks = chosen.reduce((sum, m) => sum + m.workbooks.length, 0);
-    bulk.replaceChildren(
+    bulk.replaceChildren(...[ // (replaceChildren would show a null as the word "null")
       el('span', { class: 'bulk-count' }, `${chosen.length} month${chosen.length === 1 ? '' : 's'} ticked`),
       sending ? el('button', { class: 'btn btn-primary', type: 'button', disabled: !csvs, onclick: (e) => sendMonths(chosen, rows, e.currentTarget) },
         'Send to Business Central') : null,
@@ -421,7 +421,8 @@ function renderJournals() {
         'Download all journal CSVs'),
       el('button', { class: 'btn', type: 'button', disabled: !workbooks, onclick: () => downloadWorkbooks(chosen) },
         'Download all engineer workbooks'),
-      el('button', { class: 'link-btn', type: 'button', onclick: () => { selected.clear(); refresh(); } }, 'Clear'));
+      el('button', { class: 'link-btn', type: 'button', onclick: () => { selected.clear(); refresh(); } }, 'Clear'),
+    ].filter(Boolean));
   };
   allTick.addEventListener('change', () => {
     if (allTick.checked) list.forEach((m) => selected.add(m.month));
@@ -587,9 +588,10 @@ function renderBcStrip() {
         `. Journals go to ${t.batch} in ${t.company}${t.environment === 'Production' ? '' : ` (${t.environment})`}.`)),
     el('button', { class: 'btn btn-sm', type: 'button', onclick: bcSignOut }, 'Sign out'));
   } else {
-    strip.replaceChildren(
+    strip.replaceChildren(...[
       el('button', { class: 'btn btn-primary', type: 'button', onclick: bcSignIn }, 'Sign in to Business Central'),
-      bcState.problem ? el('p', { class: 'form-message bc-problem' }, bcState.problem) : null);
+      bcState.problem && el('p', { class: 'form-message bc-problem' }, bcState.problem),
+    ].filter(Boolean));
   }
 }
 
@@ -764,16 +766,16 @@ function renderBcSettings() {
     }
   });
   const configured = bcConfigured(cfg);
-  box.replaceChildren(
-    configured ? el('p', { class: 'muted bc-summary' }, `Journals go to ${cfg.batch}${cfg.company ? ` in ${cfg.company}` : ''}`
-      + `${cfg.environment === 'Production' ? '' : ` (${cfg.environment})`}: CAPEX job lines to G/L ${cfg.capexAccount}, REVEX to ${cfg.revexAccount}.`) : null,
+  box.replaceChildren(...[
+    configured && el('p', { class: 'muted bc-summary' }, `Journals go to ${cfg.batch}${cfg.company ? ` in ${cfg.company}` : ''}`
+      + `${cfg.environment === 'Production' ? '' : ` (${cfg.environment})`}: CAPEX job lines to G/L ${cfg.capexAccount}, REVEX to ${cfg.revexAccount}.`),
     el('details', { class: 'bc-settings', open: !configured },
       el('summary', {}, configured ? 'Change the settings' : 'Settings'),
       el('div', { class: 'bc-grid' }, fields),
       el('div', { class: 'bc-actions' }, save),
       status),
     bcSetupHelp(),
-  );
+  ].filter(Boolean));
 }
 
 function bcSetupHelp() {
