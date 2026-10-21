@@ -4,7 +4,7 @@ A calendar-style timesheet website for engineers that replaces the
 "Engineer timewriting" spreadsheet. Engineers sign in with their own username and password,
 pick jobs from the Business Central job list, enter their hours day by day and press **Save**.
 They can come back to change a month, or reuse a month's rows for the next one. An **Admin** page lets the
-office upload a new Business Central job report and download the journals. GitHub Actions build:
+office upload a new Business Central job report and send the journals straight into Business Central (or download them). GitHub Actions build:
 
 - **Timewriting Journal - Sep 2026.csv / .xlsx**: the journal uploaded to Business Central, laid out like the old Journal sheet, and
 - **Engineer timewriting - &lt;name&gt; - September 2026.xlsx**: each engineer's month in the old "Timewriting 1-For Engineer" layout.
@@ -43,10 +43,40 @@ Working with the data repo (updating jobs, rates, downloading journals) is descr
 **Admins** (listed under `admins` in the data repo's settings) sign in to the **Admin** page, where they can:
 - upload a new *Job Task Overview* report, which is checked, saved in the private repo and published to the website within a minute or two;
 - add and remove engineers, set each engineer's recharge rate (there's no default rate) and email address (for password resets), and see, copy or reset passwords;
-- view and download each month's journal and engineer workbooks, and **Close** a month once its journal is uploaded, which freezes it (with fireworks, as for an engineer's Save);
+- view each month's journal, and **Send to BC** to put it into a Job G/L Journal batch in Business Central once Business Central has checked every line (see *Sending journals to Business Central* below);
+- download journals and engineer workbooks: **Engineer workbooks** for one month, or tick months for **Download all journal CSVs** and **Download all engineer workbooks** (several months come as one .zip);
+- **Close** a month once its journal is in Business Central, which freezes it (with fireworks, as for an engineer's Save);
 - **View** an engineer's pages as they see them, read-only (from their saved months; nothing can be changed or saved).
 
 Engineers can copy their jobs and other-time rows from any month they've saved (**New timesheet** on My timesheets). Closed months are read-only and can't be deleted. In the Admin page's **View**, the office can also see each engineer's **Journal preview**.
+
+## Sending journals to Business Central
+
+**Send to BC** on the Admin page puts a month's journal into a Job G/L Journal batch (Business Central calls it the Project G/L Journal). It runs in the browser: the Admin page signs in to Microsoft in a pop-up and talks to Business Central online directly, through the journal page published as an OData web service. Nothing goes through GitHub, and it can do only what the signed-in person's Business Central user can do. The lines are left in the batch for the office to check and post in Business Central as usual.
+
+Each line of the month's journal CSV becomes a journal line:
+
+| Journal field | Job lines | Balancing line (one per engineer) |
+| --- | --- | --- |
+| Posting Date | the month's last day | the same |
+| Document No. | Document number | the same |
+| Account No. (G/L Account) | the G/L account set for CAPEX or REVEX lines | GL (`balancingGlAccount`) |
+| Description | Description | the same |
+| Amount | GST inclusive (the journal has no GST) | the same (negative) |
+| Project No., Project Task No. | Project, Capex/Revex | blank |
+| Project Quantity | No. of hours | blank |
+| Bal. Account No. | blank | blank |
+
+Before anything is saved, Business Central checks every line. The page sends them all in one transaction that ends with a line Business Central has to refuse, so it validates every line (jobs, tasks, accounts, posting dates) and then keeps none. The panel says what's wrong and on which line, and warns if the batch already has this month's lines or the month has already been posted. **Send** then adds the lines, as one transaction per 100 lines with each engineer's lines kept together. If Business Central refuses a line, none of that batch is kept and any already sent are taken back out. **Take them back out** removes the lines just sent, as long as they haven't been posted.
+
+To set it up (the Admin page's **Business Central** card has the same steps, with this website's exact address):
+
+1. **Register the website with Microsoft.** In the Microsoft Entra admin center: *App registrations › New registration*, single tenant. Under Redirect URI, choose *Single-page application (SPA)* with `https://<this website>/microsoft.html`. Copy the Application (client) ID and Directory (tenant) ID.
+2. **Let it use Business Central.** *API permissions › Add a permission › Dynamics 365 Business Central › Delegated › Financials.ReadWrite.All*, then *Grant admin consent*. There's no client secret: the sign-in uses PKCE, as single-page apps do.
+3. **Publish the journal page.** In Business Central's *Web Services* page: *New*, Object Type `Page`, Object ID `1020`, Service Name `JobGLJournal`, *Published*.
+4. **Fill in the Business Central card** on the Admin page: tenant, App (client) ID, environment (`Production`, or a sandbox to try it first), company, journal batch and template, web service name, and the G/L accounts for CAPEX and REVEX job lines. **Save**, then **Check connection**. It only reads: it signs in, finds the company, the web service, the batch (and its template, if it has lines) and the G/L accounts.
+
+The settings are saved in the private repo's `settings.json` under `businessCentral`. The batch name and G/L accounts only live there, never in this repo.
 
 ## Repository layout
 

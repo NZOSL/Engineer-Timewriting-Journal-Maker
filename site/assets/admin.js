@@ -5,8 +5,9 @@
 
 import {
   $, el, toast, loadSession, clearSession, openSession, adminRepo, b64ToBytes, bytesToB64, journalTable, monthInfo,
-  cleanText, nameProblem, nameKey, defaultUsername, issuedPassword,
+  cleanText, nameProblem, nameKey, defaultUsername, issuedPassword, JOURNAL_HEADER,
 } from './app.js';
+import * as bc from './bc.js';
 import { fireworks } from './fireworks.js';
 
 const session = loadSession();
@@ -291,11 +292,11 @@ function download(file) {
 }
 
 async function showJournal(row, month, files) {
-  const open = row.nextElementSibling?.classList.contains('journal-row');
+  const open = row.nextElementSibling?.matches('tr.journal-row[data-kind="view"]');
   document.querySelectorAll('tr.journal-row').forEach((tr) => tr.remove());
   if (open) return;
   const cell = el('td', { colspan: 3 }, el('p', { class: 'muted' }, 'Loading the journal…'));
-  row.after(el('tr', { class: 'journal-row' }, cell));
+  row.after(el('tr', { class: 'journal-row', dataset: { kind: 'view' } }, cell));
   try {
     const csv = files.find((f) => f.name.endsWith('.csv'));
     const text = (file) => new TextDecoder().decode(file.data);
@@ -423,7 +424,9 @@ async function loadJournals() {
             closed ? el('span', { class: 'chip chip-muted chip-inline' }, 'Closed') : null,
             el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)))),
         el('td', { class: 'download-cell' },
-          csv && el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV'),
+          csv && (bcReady()
+            ? el('button', { class: 'btn btn-sm btn-primary', type: 'button', title: 'Check this month’s journal with Business Central, then send it', onclick: (e) => openSend(e.currentTarget.closest('tr'), month, csv) }, 'Send to BC')
+            : el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV')),
           workbooks.length ? el('details', { class: 'workbooks', name: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
             el('div', { class: 'workbook-list' },
               workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,
@@ -443,6 +446,362 @@ async function loadJournals() {
   } catch (error) {
     box.replaceChildren(el('p', { class: 'form-message' }, error.message));
   }
+}
+
+// --------------------------------------------------------- Business Central
+
+// The settings (in settings.json, under "businessCentral"): where to send the journal lines.
+const BC_FIELDS = [
+  ['tenant', 'Microsoft tenant', 'Your organisation’s domain (like example.co.nz) or Directory (tenant) ID.'],
+  ['clientId', 'App (client) ID', 'From the app registration (see Setting up).'],
+  ['environment', 'Environment', 'Production, or a sandbox’s name to try things out first.'],
+  ['company', 'Company', 'Its name, as Business Central shows it.'],
+  ['batch', 'Journal batch', 'The Job G/L Journal batch the lines go into.'],
+  ['template', 'Journal template', 'The template that batch belongs to. Check connection fills it in if the batch has lines.'],
+  ['service', 'Web service name', 'What page 1020 is published as (see Setting up).'],
+  ['capexAccount', 'G/L account for CAPEX job lines', 'Job lines have no GL in the CSV: this is where CAPEX hours go.'],
+  ['revexAccount', 'G/L account for REVEX job lines', 'And where REVEX hours go.'],
+];
+const BC_DEFAULTS = { environment: 'Production', service: 'JobGLJournal' };
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BC_RULES = {
+  tenant: [(v) => GUID_RE.test(v) || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v), 'The Microsoft tenant should be a domain like example.co.nz or an ID like 1b2c3d4e-….'],
+  clientId: [(v) => GUID_RE.test(v), 'The App (client) ID looks like 1b2c3d4e-5f60-7a8b-9c0d-1e2f3a4b5c6d.'],
+  environment: [(v) => /^[A-Za-z0-9_-]{1,30}$/.test(v), 'The environment name is letters, numbers, - and _ (like Production).'],
+  company: [(v) => v.length <= 30, 'Company names in Business Central are at most 30 characters.'],
+  batch: [(v) => v.length <= 10, 'Journal batch names are at most 10 characters.'],
+  template: [(v) => v.length <= 10, 'Journal template names are at most 10 characters.'],
+  service: [(v) => /^[A-Za-z0-9_]{1,240}$/.test(v), 'Web service names are letters, numbers and _.'],
+  capexAccount: [(v) => v.length <= 20, 'G/L account numbers are at most 20 characters.'],
+  revexAccount: [(v) => v.length <= 20, 'G/L account numbers are at most 20 characters.'],
+};
+const bcConfig = () => ({ ...BC_DEFAULTS, ...(state.settings?.businessCentral || {}) });
+const bcReady = (cfg = bcConfig()) => BC_FIELDS.every(([key]) => String(cfg[key] || '').trim());
+
+// What's wrong with these settings, if anything (`needed`: the ones that must be filled in).
+function bcProblem(cfg, needed = BC_FIELDS.map(([key]) => key)) {
+  const missing = BC_FIELDS.filter(([key]) => needed.includes(key) && !cfg[key]).map(([, label]) => label);
+  if (missing.length) return `Fill in ${missing.join(', ')}.`;
+  const broken = Object.entries(BC_RULES).find(([key, [ok]]) => cfg[key] && !ok(cfg[key]));
+  return broken ? broken[1][1] : '';
+}
+
+// A list of steps (like the upload's), each busy, ok, warn or error.
+function stepper(list) {
+  let current = '';
+  const say = (id, text, tone = 'busy') => {
+    current = id;
+    list.hidden = false;
+    let item = list.querySelector(`[data-step="${id}"]`);
+    if (!item) {
+      item = el('li', { dataset: { step: id } });
+      list.append(item);
+    }
+    item.dataset.tone = tone;
+    item.replaceChildren(el('span', { class: 'step-icon', 'aria-hidden': 'true' }, { busy: '', ok: '✓', warn: '!', error: '!' }[tone]), el('span', {}, text));
+  };
+  say.current = () => current;
+  say.clear = () => { list.replaceChildren(); list.hidden = true; current = ''; };
+  return say;
+}
+
+// Signed in to Microsoft, the company found (by name or display name) and its exact name used.
+async function bcTarget(cfg, say) {
+  if (!bc.signedInAs(cfg)) {
+    say('signin', 'Signing in to Microsoft (in a pop-up window)…');
+    await bc.signIn(cfg);
+  }
+  say('signin', `Signed in to Microsoft as ${bc.signedInAs(cfg)}.`, 'ok');
+  renderBcWho();
+  say('company', `Finding the company “${cfg.company}”…`);
+  const all = await bc.companies(cfg);
+  const wanted = cfg.company.toLowerCase();
+  const company = all.find((c) => [c.name, c.displayName].some((n) => String(n || '').toLowerCase() === wanted));
+  if (!company) {
+    const names = all.map((c) => `“${c.name}”`).join(', ');
+    throw new Error(`Business Central has no company called “${cfg.company}”${names ? `. Yours: ${names}` : ' that you can use'}.`);
+  }
+  say('company', `Company: ${company.displayName || company.name}${cfg.environment === 'Production' ? '' : ` (in ${cfg.environment})`}.`, 'ok');
+  return { ...cfg, company: company.name, companyId: company.id };
+}
+
+const serviceProblem = (cfg, error) => (error.status === 404
+  ? `Business Central has no web service called “${cfg.service}” in this company. Publish page 1020 under that name (see Setting up), or fix the name.`
+  : error.message);
+
+function renderBcWho() {
+  const who = $('#bc-who');
+  if (!who) return;
+  // The tenant and app being typed in count, as Check connection signs in with them.
+  const typed = (key) => $(`#bc-${key}`)?.value.trim();
+  const user = bc.signedInAs({ ...bcConfig(), tenant: typed('tenant') || bcConfig().tenant, clientId: typed('clientId') || bcConfig().clientId });
+  who.replaceChildren(user
+    ? el('span', {}, 'Signed in to Microsoft as ', el('strong', {}, user), '. ',
+      el('button', { class: 'link-btn link-inline', type: 'button', onclick: () => { bc.signOut(); renderBcWho(); } }, 'Sign out of Microsoft'))
+    : el('span', { class: 'muted' }, 'Not signed in to Microsoft: you’ll be asked to when you check the connection or send a journal.'));
+}
+
+function renderBc() {
+  const box = $('#bc');
+  const cfg = bcConfig();
+  const inputs = {};
+  const fields = BC_FIELDS.map(([key, label, hint]) => {
+    inputs[key] = el('input', { id: `bc-${key}`, type: 'text', value: cfg[key] || '', autocomplete: 'off', spellcheck: false });
+    return el('label', { class: 'field' }, el('span', {}, label), inputs[key], el('small', {}, hint));
+  });
+  // Business Central keeps codes (batch, template, G/L account numbers) in capitals.
+  const CODES = ['batch', 'template', 'capexAccount', 'revexAccount'];
+  const read = () => Object.fromEntries(BC_FIELDS.map(([key]) => {
+    const value = inputs[key].value.trim();
+    return [key, CODES.includes(key) ? value.toUpperCase() : value];
+  }));
+  const status = el('p', { class: 'bc-status', role: 'status' });
+  const steps = el('ul', { class: 'steps', hidden: true });
+  const say = stepper(steps);
+  const show = (text, tone = '') => { status.textContent = text; status.dataset.tone = tone; };
+  const save = el('button', { class: 'btn btn-primary', type: 'button' }, 'Save');
+  const check = el('button', { class: 'btn', type: 'button' }, 'Check connection');
+
+  save.addEventListener('click', async () => {
+    const next = read();
+    const problem = bcProblem(next, []);
+    if (problem) { show(problem, 'error'); return; }
+    save.disabled = true;
+    show('Saving…');
+    try {
+      const businessCentral = Object.fromEntries(Object.entries(next).filter(([, value]) => value));
+      await saveSettings({ ...state.settings, businessCentral }, { message: 'Business Central settings', wait: false });
+      show(bcReady() ? 'Saved. Each month in Journals now has Send to BC.' : 'Saved. Fill in the rest to send journals.', 'ok');
+      loadJournals();
+    } catch (error) {
+      show(error.message, 'error');
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  // Reads only: signs in, finds the company, the web service, the batch and the G/L accounts.
+  check.addEventListener('click', async () => {
+    let target = read();
+    const problem = bcProblem(target, ['tenant', 'clientId', 'environment', 'company', 'batch', 'service']);
+    if (problem) { show(problem, 'error'); return; }
+    show('');
+    say.clear();
+    check.disabled = true;
+    try {
+      target = await bcTarget(target, say);
+      if (!target.template) {
+        say('template', `Finding the journal template from the lines in ${target.batch}…`);
+        let found;
+        try {
+          found = await bc.findTemplate(target);
+        } catch (error) {
+          throw new Error(serviceProblem(target, error));
+        }
+        if (!found) {
+          say('template', `${target.batch} has no lines, so its journal template can’t be found from them. Type it in: Business Central’s General Journal Templates page lists it, with the type Projects (or Jobs).`, 'warn');
+          return;
+        }
+        inputs.template.value = found;
+        target.template = found;
+        say('template', `The journal template is ${found}. Press Save to keep it.`, 'ok');
+      }
+      say('batch', `Reading ${target.batch}…`);
+      let waiting;
+      try {
+        waiting = await bc.batchLines(target);
+      } catch (error) {
+        throw new Error(serviceProblem(target, error));
+      }
+      say('batch', `The web service “${target.service}” answers, and ${target.template} ${target.batch} has ${waiting.length ? `${waiting.length} line${waiting.length === 1 ? '' : 's'}` : 'no lines'} waiting to be posted.`, 'ok');
+      const accounts = [['capex', 'CAPEX job lines', target.capexAccount], ['revex', 'REVEX job lines', target.revexAccount],
+        ['balancing', 'Balancing lines', String(state.bundle.journal?.balancingGlAccount || '')]];
+      for (const [id, what, number] of accounts) {
+        if (!number) { say(id, `${what}: no G/L account set yet.`, 'warn'); continue; }
+        const account = await bc.glAccount(target, target.companyId, number);
+        if (!account) say(id, `${what}: Business Central has no G/L account ${number}.`, 'error');
+        else if (account.blocked) say(id, `${what}: G/L account ${number} “${account.displayName}” is blocked.`, 'error');
+        else if (!account.directPosting) say(id, `${what}: G/L account ${number} “${account.displayName}” doesn’t allow direct posting.`, 'error');
+        else say(id, `${what}: G/L account ${number}, “${account.displayName}”.`, 'ok');
+      }
+      const saved = state.settings?.businessCentral || {};
+      const now = read();
+      const changed = BC_FIELDS.some(([key]) => (now[key] || '') !== (saved[key] || ''));
+      show(changed ? 'Connected. Press Save to keep these settings.' : 'Connected.', 'ok');
+    } catch (error) {
+      say(say.current() || 'signin', error.message, 'error');
+    } finally {
+      check.disabled = false;
+    }
+  });
+
+  box.replaceChildren(
+    el('p', { id: 'bc-who', class: 'bc-who' }),
+    el('div', { class: 'bc-grid' }, fields),
+    el('div', { class: 'bc-actions' }, save, check),
+    status,
+    steps,
+    bcSetupHelp(),
+  );
+  renderBcWho();
+}
+
+function bcSetupHelp() {
+  const code = (text) => el('code', {}, text);
+  return el('details', { class: 'bc-help' }, el('summary', {}, 'Setting up'),
+    el('ol', {},
+      el('li', {}, el('strong', {}, 'Register the website with Microsoft. '),
+        'In the Microsoft Entra admin center (entra.microsoft.com), go to ', el('em', {}, 'App registrations › New registration'),
+        '. Name it Engineer Timewriting, choose ', el('em', {}, 'Accounts in this organizational directory only'),
+        ', and under Redirect URI pick ', el('em', {}, 'Single-page application (SPA)'), ' with ', code(bc.redirectUri()),
+        '. Register, then copy the ', el('em', {}, 'Application (client) ID'), ' and ', el('em', {}, 'Directory (tenant) ID'), ' into the boxes above.'),
+      el('li', {}, el('strong', {}, 'Let it use Business Central. '),
+        'In the registration, ', el('em', {}, 'API permissions › Add a permission › Dynamics 365 Business Central › Delegated permissions'),
+        ', tick ', code('Financials.ReadWrite.All'), ', add it, then press ', el('em', {}, 'Grant admin consent'),
+        ' (or ask whoever looks after your Microsoft 365 to). It only ever acts as the person signed in, with their Business Central permissions.'),
+      el('li', {}, el('strong', {}, 'Publish the journal page. '),
+        'In Business Central, search for ', el('em', {}, 'Web Services'), ', choose ', el('em', {}, 'New'), ': Object Type ', code('Page'),
+        ', Object ID ', code('1020'), ' (Project G/L Journal), Service Name ', code('JobGLJournal'), ', and tick ', el('em', {}, 'Published'), '.'),
+      el('li', {}, el('strong', {}, 'Fill in the rest above, Save, then Check connection. '),
+        'Try it with a sandbox first if you have one (put its name in Environment), or send a month and use ',
+        el('em', {}, 'Take them back out'), ' before posting.')));
+}
+
+// A month's journal (its CSV) as Job G/L Journal lines. Job lines go to the CAPEX or REVEX G/L
+// account with their job, task and hours; each engineer's balancing line goes to its GL
+// account. Lines are dated the month's last day, like the journal.
+function journalLines(month, csv, cfg) {
+  const [header = [], ...rows] = parseCsv(new TextDecoder().decode(csv.data)).filter((r) => r.length > 1);
+  const at = new Map(JOURNAL_HEADER.map((name) => [name, header.indexOf(name)]));
+  if ([...at.values()].some((i) => i < 0)) throw new Error('This month’s journal doesn’t have the usual columns, so it can’t be sent.');
+  const [EMPLOYEE, , AMOUNT, , , GL, PROJECT, DESCRIPTION, TASK, HOURS, , DOCUMENT] = JOURNAL_HEADER;
+  const [year, number] = month.split('-').map(Number);
+  const date = new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10);
+  return rows.map((cells) => {
+    const get = (name) => String(cells[at.get(name)] ?? '').trim();
+    const employee = get(EMPLOYEE);
+    const project = get(PROJECT);
+    const task = get(TASK).toUpperCase();
+    const fields = { Posting_Date: date, Document_No: get(DOCUMENT), Description: get(DESCRIPTION), Amount: Number(get(AMOUNT)), Bal_Account_No: '' };
+    if (!project) return { group: employee, label: `${employee}, balancing line`, fields: { ...fields, Account_No: get(GL) } };
+    const account = { CAPEX: cfg.capexAccount, REVEX: cfg.revexAccount }[task];
+    if (!account) throw new Error(`${employee}, ${project}: only CAPEX and REVEX tasks have a G/L account set, not “${task}”.`);
+    return {
+      group: employee,
+      label: `${employee}, ${project} ${task}`,
+      fields: { ...fields, Account_No: account, Job_No: project, Job_Task_No: task, Job_Quantity: Number(get(HOURS)) },
+    };
+  });
+}
+
+const nzd = (value) => value.toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' });
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// "Send to BC" on a month: check every line with Business Central, then send them.
+function openSend(row, month, csv) {
+  const wasOpen = row.nextElementSibling?.matches('tr.journal-row[data-kind="send"]');
+  document.querySelectorAll('tr.journal-row').forEach((tr) => tr.remove());
+  if (wasOpen) return;
+  const cfg = bcConfig();
+  const steps = el('ul', { class: 'steps' });
+  const actions = el('div', { class: 'bc-actions' });
+  const say = stepper(steps);
+  row.after(el('tr', { class: 'journal-row', dataset: { kind: 'send' } }, el('td', { colspan: 3 },
+    el('div', { class: 'bc-panel' }, el('h3', {}, `Send ${monthInfo(month).label} to Business Central`), steps, actions))));
+  const button = (label, onclick, primary = false) => el('button', { class: `btn btn-sm${primary ? ' btn-primary' : ''}`, type: 'button', onclick }, label);
+  const close = () => row.nextElementSibling?.matches('tr.journal-row[data-kind="send"]') && row.nextElementSibling.remove();
+
+  let lines;
+  try {
+    lines = journalLines(month, csv, cfg);
+  } catch (error) {
+    say('lines', error.message, 'error');
+    return;
+  }
+  if (!lines.length) {
+    say('lines', 'This month’s journal has no lines yet.', 'error');
+    return;
+  }
+  const charged = lines.filter((l) => l.fields.Job_No).reduce((sum, l) => sum + l.fields.Amount, 0);
+  say('lines', `${plural(lines.length, 'line')} for ${plural(new Set(lines.map((l) => l.group)).size, 'engineer')}: ${nzd(charged)} charged to jobs, balanced to GL ${lines.find((l) => !l.fields.Job_No)?.fields.Account_No || '?'}.`, 'ok');
+  let target;
+  let sent = [];
+
+  const failed = (error) => {
+    say(say.current(), error.message, 'error');
+    actions.replaceChildren(
+      error.signIn ? button('Sign in again', () => { bc.signOut(); renderBcWho(); prepare(); }, true) : button('Try again', prepare, true),
+      button('Cancel', close));
+  };
+
+  // Look at the batch, and have Business Central check every line without saving any.
+  async function prepare() {
+    actions.replaceChildren();
+    try {
+      target = await bcTarget(cfg, say);
+      say('batch', `Looking at ${cfg.batch}…`);
+      let waiting;
+      try {
+        waiting = await bc.batchLines(target);
+      } catch (error) {
+        throw Object.assign(new Error(serviceProblem(target, error)), { signIn: error.signIn });
+      }
+      const documentNo = lines[0].fields.Document_No;
+      const same = waiting.filter((l) => String(l.Document_No || '').toUpperCase() === documentNo.toUpperCase());
+      const posted = await bc.postedEntries(target, target.companyId, documentNo);
+      const others = waiting.length - same.length;
+      if (same.length) {
+        say('batch', `${cfg.batch} already has ${plural(same.length, 'line')} for ${documentNo}: this month looks like it’s been sent. Sending again would add them twice.`, 'warn');
+      } else if (posted.length) {
+        say('batch', `${documentNo} is already posted in Business Central (dated ${posted[0].postingDate}). Sending again would charge the jobs twice.`, 'warn');
+      } else {
+        say('batch', `${cfg.batch} has ${others ? `${plural(others, 'other line')} waiting` : 'no lines waiting'}.`, 'ok');
+      }
+      say('check', `Business Central is checking all ${plural(lines.length, 'line')} (nothing is saved)…`);
+      const { saved } = await bc.addLines(target, lines, { check: true });
+      say('check', `Business Central checked all ${plural(lines.length, 'line')} and found nothing wrong. Nothing has been saved yet.`, 'ok');
+      const gst = saved.filter((line) => Number(line.bc.VAT_Amount)).length;
+      if (gst) say('gst', `Business Central would add GST to ${plural(gst, 'line')} (their G/L account has a GST posting setup), but the journal has none. Check before sending.`, 'warn');
+      const again = same.length || posted.length;
+      actions.replaceChildren(
+        button(again ? `Send anyway (${plural(lines.length, 'line')})` : `Send ${plural(lines.length, 'line')} to ${cfg.batch}`, send, !again),
+        button('Cancel', close));
+    } catch (error) {
+      failed(error);
+    }
+  }
+
+  async function send() {
+    actions.replaceChildren();
+    try {
+      say('send', `Sending ${plural(lines.length, 'line')} to ${cfg.batch}…`);
+      sent = (await bc.addLines(target, lines)).lineNos;
+      say('send', `Sent ${plural(sent.length, 'line')} to ${target.template} ${cfg.batch}. Check them in Business Central, then post them there.`, 'ok');
+      fireworks();
+      actions.replaceChildren(
+        el('a', { class: 'btn btn-sm btn-primary', href: bc.journalLink(target), target: '_blank', rel: 'noopener noreferrer' }, 'Open in Business Central'),
+        button('Take them back out', takeBack));
+    } catch (error) {
+      failed(error);
+    }
+  }
+
+  async function takeBack() {
+    actions.replaceChildren();
+    try {
+      say('undo', `Taking the ${plural(sent.length, 'line')} back out of ${cfg.batch}…`);
+      const removed = await bc.removeLines(target, sent);
+      say('undo', removed === sent.length ? `Took the ${plural(removed, 'line')} back out of ${cfg.batch}.`
+        : `Took ${removed} of the ${plural(sent.length, 'line')} back out; the others were already gone (posted, or deleted in Business Central).`, 'ok');
+      sent = [];
+      actions.replaceChildren(button('Close', close));
+    } catch (error) {
+      say('undo', error.message, 'error');
+      actions.replaceChildren(button('Try again', takeBack, true), button('Close', close));
+    }
+  }
+
+  prepare();
 }
 
 // -------------------------------------------------------- engineers & rates
@@ -798,6 +1157,7 @@ async function start() {
     $('#jobs-card').hidden = true;
     $('#staff-card').hidden = true;
     $('#journals-card').hidden = true;
+    $('#bc-card').hidden = true;
     notice('info', 'This page is for the office. Use My timesheets to fill in your hours.');
     return;
   }
@@ -811,6 +1171,7 @@ async function start() {
     $('#report-file').disabled = true;
     $('#journals').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
     $('#staff').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
+    $('#bc').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
     return;
   }
   state.repo = adminRepo(state.bundle, state.profile);
@@ -819,8 +1180,10 @@ async function start() {
   setUpWorkbookMenus();
   try {
     await loadSettings();
+    renderBc();
   } catch (error) {
     $('#staff').replaceChildren(el('p', { class: 'form-message' }, error.message));
+    $('#bc').replaceChildren(el('p', { class: 'form-message' }, error.message));
   }
   loadJournals();
 }

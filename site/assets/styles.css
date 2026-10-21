@@ -682,6 +682,28 @@ table.journal-table tr.balancing td { font-weight: 650; border-bottom: 2px solid
 .link-btn { padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
 .link-btn:hover, .link-btn:focus-visible { background: var(--accent-weak); outline: none; }
 .journal-row > td { padding: 4px 12px 20px !important; border-top: 0 !important; }
+[data-tone="warn"] > .step-icon { background: var(--warn-bg); color: var(--warn); }
+
+/* Business Central: the settings card, and the Send to BC panel under a month */
+.bc-who { margin: 0 0 16px; }
+.link-inline { padding: 2px 4px; color: var(--accent); }
+.bc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 20px; }
+.bc-grid .field { align-content: start; }
+.bc-grid .field input { height: 36px; }
+.bc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.bc-status { margin: 12px 0 0; }
+.bc-status:empty { display: none; }
+.bc-status[data-tone="ok"] { color: var(--ok); }
+.bc-status[data-tone="error"] { color: var(--danger); }
+.bc-help { margin-top: 20px; }
+.bc-help > summary { cursor: pointer; font-weight: 600; }
+.bc-help ol { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.bc-help code { overflow-wrap: anywhere; }
+.bc-panel { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--info-bg); white-space: normal; }
+.bc-panel h3 { margin: 0; font-size: 15px; }
+.bc-panel .steps { margin-top: 10px; }
+.bc-panel .bc-actions:empty { display: none; }
+.bc-panel .bc-actions { margin-top: 14px; }
 .checks { margin-top: 12px; padding: 10px 14px; border-radius: 8px; }
 .checks ul { margin: 6px 0 0; padding-left: 20px; }
 .checks-warn { background: var(--warn-bg); }
@@ -804,7 +826,11 @@ html.framed body { display: none !important; }
   .card-head { padding: 16px 16px 4px; }
   .card-body { padding: 12px 16px 16px; }
   .download-cell { white-space: normal; }
-  .download-cell > * { margin: 0 6px 6px 0 !important; }
+  .download-cell > * { margin: 0 0 6px !important; }
+  /* the buttons fill the narrow column, their words wrapping, instead of running into the next one */
+  .download-cell > .btn { display: flex; width: 100%; }
+  .download-cell > .workbooks { display: block; }
+  .download-cell .btn, .workbooks > summary { width: 100%; height: auto; min-height: 30px; padding: 5px 8px; white-space: normal; line-height: 1.25; text-align: center; }
   .journal-row > td { padding: 4px 12px 16px !important; }
   .journals thead th:nth-child(1) { width: 36%; }
   .journals thead th:nth-child(3) { width: 96px; }

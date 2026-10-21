@@ -609,6 +609,19 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_settings(path)
 
+    def test_business_central(self):
+        """The Admin page's Business Central settings are kept as they are, and must be texts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+            bc = {"tenant": "example.co.nz", "batch": "TIME", "capexAccount": "6100"}
+            path.write_text(json.dumps({"businessCentral": bc}))
+            self.assertEqual(load_settings(path)["businessCentral"], bc)
+            self.assertNotIn("businessCentral", load_settings(Path(tmp) / "missing.json"))
+            for wrong in ([], {"batch": 7}, {"batch": "x" * 301}):
+                path.write_text(json.dumps({"businessCentral": wrong}))
+                with self.assertRaises(ValueError):
+                    load_settings(path)
+
 
 
 class ZeroHourJobTests(unittest.TestCase):
