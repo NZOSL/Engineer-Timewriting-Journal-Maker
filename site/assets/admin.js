@@ -336,7 +336,6 @@ async function loadJournals() {
     const rows = months.map((month) => {
       const files = byMonth.get(month);
       const csv = files.find((f) => f.name.endsWith('.csv'));
-      const xlsx = files.find((f) => f.name.startsWith('Timewriting Journal') && f.name.endsWith('.xlsx'));
       // Each engineer's workbook, and (if they have jobs with no hours) a copy without those.
       const workbooks = files.filter((f) => f.name.startsWith('Engineer timewriting') && !f.name.endsWith(HOURS_ONLY));
       const pick = (f) => {
@@ -350,7 +349,6 @@ async function loadJournals() {
           el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)),
         el('td', { class: 'download-cell' },
           csv && el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV'),
-          xlsx && el('button', { class: 'btn btn-sm', type: 'button', onclick: () => download(xlsx) }, 'Journal Excel'),
           workbooks.length ? el('details', { class: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
             el('div', { class: 'workbook-list' },
               workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,

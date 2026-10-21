@@ -14,7 +14,7 @@ website's **Admin page** to work with them. How it's all protected is in the web
 | To… | Do this |
 | --- | --- |
 | Update the job list | On the website's **Admin** page, drop the **Job Task Overview** export from Business Central into the upload box. It's encrypted in the browser and saved here as `input/report.json`, and the page shows when the website has the new list (about a minute). Don't upload spreadsheets to GitHub directly: they'd be readable, and the Actions ignore them. |
-| Get the journal for Business Central | On the **Admin** page, under **Journals**, download the month's **Journal CSV** (or **View** it first). The same journal is in an `.xlsx` with formulas, like the old spreadsheet. |
+| Get the journal for Business Central | On the **Admin** page, under **Journals**, download the month's **Journal CSV** (or **View** it first). |
 | See one engineer's month | On the **Admin** page, under **Engineer workbooks**: laid out like the old "Timewriting 1-For Engineer" sheet. |
 | Check for problems | **View** a month on the **Admin** page: it lists hours on jobs that aren't open, days over 24 hours and missing rates. |
 | Let someone use the Admin page | Add them to `admins` in `settings.json` (see *Changing files by hand* below). They get a password like everyone else. Someone in both lists gets both pages. |
