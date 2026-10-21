@@ -77,27 +77,6 @@ ones, and the epoch moves on, which signs out anyone who had the old password.
   password. That's why only the office sets email addresses (on the Admin page), and each
   person can check theirs on their **Settings** page.
 
-## Business Central
-
-**Sign in to Business Central** on the Admin page acts in Business Central as the person signed in, through
-Microsoft's own sign-in.
-
-* **Signing in** happens in a Microsoft pop-up, using the authorisation-code flow with PKCE
-  for single-page apps: there is no client secret, and the app registration only accepts
-  this website's `microsoft.html` as a return address. That page hands the one-time code to
-  the Admin page (same-origin `BroadcastChannel` and `postMessage` only) and closes. The code
-  is useless without the PKCE verifier, which never leaves the Admin page's memory.
-* **Tokens** are kept in the Admin page's memory only (not in browser storage). Reloading or
-  closing the page forgets them. The permission is Business Central's delegated
-  `Financials.ReadWrite.All`, so Business Central's own permissions for that person apply.
-* **Nothing goes through GitHub.** The browser talks to `login.microsoftonline.com` and
-  `api.businesscentral.dynamics.com` directly; only the Admin page's content security
-  policy allows those two. The settings (tenant, app ID, company, batch, G/L accounts) are
-  in the encrypted `settings.json`, not in this repo.
-* **Lines are drafts until posted.** They go into a journal batch for the office to check
-  and post in Business Central. Each send is a transaction: Business Central keeps all of a
-  batch's lines or none.
-
 ## Attacks considered
 
 * **A curious or malicious engineer.** Everyone signed in shares the save token, so they
@@ -138,9 +117,6 @@ Microsoft's own sign-in.
   through the website shows as the owner of the tokens.
 * **Tokens expire.** Fine-grained tokens have an end date: renew `SAVE_TOKEN` and
   `ADMIN_TOKEN` before then, or saving and the Admin page stop working.
-* **An admin's open Admin page can act in Business Central as them.** Like the admin
-  token, a Microsoft sign-in on the Admin page is only as safe as the computer it's on, until
-  the page is closed.
 
 Server-backed sign-in (for example Microsoft Entra ID, the same accounts as Business
 Central) would remove the shared save token entirely. It needs a small backend, such as an

@@ -261,11 +261,6 @@ def _check_settings(settings: dict) -> None:
     labels = settings["journal"].get("monthLabels")
     if not isinstance(labels, list) or len(labels) != 12:
         raise ValueError("settings.json: journal.monthLabels must list 12 month labels.")
-    # Where the Admin page sends journals in Business Central (only the Admin page uses it).
-    bc = settings.get("businessCentral")
-    if bc is not None and (not isinstance(bc, dict)
-                           or not all(isinstance(k, str) and isinstance(v, str) and len(v) <= 300 for k, v in bc.items())):
-        raise ValueError("settings.json: businessCentral must be an object of short texts, like {\"batch\": \"…\"}.")
 
 
 EMAIL_RE = re.compile(r"^[^@\s<>\"',;:()\[\]]+@[^@\s<>\"',;:()\[\]]+\.[^@\s<>\"',;:()\[\]]+$")

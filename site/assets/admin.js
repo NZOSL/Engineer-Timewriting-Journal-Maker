@@ -5,9 +5,8 @@
 
 import {
   $, el, toast, loadSession, clearSession, openSession, adminRepo, b64ToBytes, bytesToB64, journalTable, monthInfo,
-  cleanText, nameProblem, nameKey, defaultUsername, issuedPassword, JOURNAL_HEADER,
+  cleanText, nameProblem, nameKey, defaultUsername, issuedPassword,
 } from './app.js';
-import * as bc from './bc.js';
 import { fireworks } from './fireworks.js';
 
 const session = loadSession();
@@ -292,11 +291,11 @@ function download(file) {
 }
 
 async function showJournal(row, month, files) {
-  const open = document.querySelector(`tr.journal-row[data-kind="view"][data-month="${month}"]`);
-  document.querySelectorAll('tr.journal-row[data-kind="view"]').forEach((tr) => tr.remove());
+  const open = row.nextElementSibling?.classList.contains('journal-row');
+  document.querySelectorAll('tr.journal-row').forEach((tr) => tr.remove());
   if (open) return;
   const cell = el('td', { colspan: 3 }, el('p', { class: 'muted' }, 'Loading the journal…'));
-  row.after(el('tr', { class: 'journal-row', dataset: { kind: 'view', month } }, cell));
+  row.after(el('tr', { class: 'journal-row' }, cell));
   try {
     const csv = files.find((f) => f.name.endsWith('.csv'));
     const text = (file) => new TextDecoder().decode(file.data);
@@ -352,10 +351,6 @@ function setUpWorkbookMenus() {
   });
 }
 
-// The months' journal files from the last load, so the list can be redrawn (say, after signing
-// in to Business Central) without fetching them again.
-let journalMonths = null;
-
 async function loadJournals() {
   const box = $('#journals');
   try {
@@ -364,8 +359,13 @@ async function loadJournals() {
     const opened = await Promise.all(entries.map(async (entry) => JSON.parse(new TextDecoder().decode(await state.repo.read(entry.path)))));
     const byMonth = new Map(opened.filter((m) => /^\d{4}-\d{2}$/.test(m?.month || ''))
       .map((m) => [m.month, Object.entries(m.files || {}).map(([name, b64]) => ({ name, data: b64ToBytes(b64) }))]));
+    const months = [...byMonth.keys()].sort().reverse();
+    if (!months.length) {
+      box.replaceChildren(el('p', { class: 'muted' }, 'No journals yet. They appear here once engineers save their timesheets.'));
+      return;
+    }
     // What each month offers, newest first.
-    journalMonths = [...byMonth.keys()].sort().reverse().map((month) => {
+    const list = months.map((month) => {
       const files = byMonth.get(month);
       // Each engineer's workbook, and (if they have jobs with no hours) a copy without those.
       const workbooks = files.filter((f) => f.name.startsWith('Engineer timewriting') && !f.name.endsWith(HOURS_ONLY));
@@ -376,428 +376,73 @@ async function loadJournals() {
       return { month, files, csv: files.find((f) => f.name.endsWith('.csv')), workbooks, pick,
         closed: (state.settings?.closedMonths || []).includes(month) };
     });
-    renderJournals();
+
+    // Ticking months swaps each month's download buttons for "Download all" buttons under the list.
+    const selected = new Set();
+    const ticks = new Map();
+    const table = el('table', { class: 'sheets journals' });
+    const bulk = el('div', { class: 'bulk-bar', role: 'region', 'aria-label': 'Download the ticked months', hidden: true });
+    const allTick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': 'Tick every month' });
+    const refresh = () => {
+      const chosen = list.filter((m) => selected.has(m.month)).reverse(); // oldest first
+      table.classList.toggle('selecting', chosen.length > 0);
+      if (chosen.length) table.querySelectorAll('details.workbooks[open]').forEach((menu) => { menu.open = false; });
+      for (const [month, tick] of ticks) {
+        tick.checked = selected.has(month);
+        tick.closest('tr')?.classList.toggle('picked', tick.checked);
+      }
+      allTick.checked = chosen.length === list.length;
+      allTick.indeterminate = chosen.length > 0 && chosen.length < list.length;
+      bulk.hidden = !chosen.length;
+      if (!chosen.length) return;
+      const csvs = chosen.filter((m) => m.csv).length;
+      const workbooks = chosen.reduce((sum, m) => sum + m.workbooks.length, 0);
+      bulk.replaceChildren(
+        el('span', { class: 'bulk-count' }, `${chosen.length} month${chosen.length === 1 ? '' : 's'} ticked`),
+        el('button', { class: 'btn btn-primary', type: 'button', disabled: !csvs, onclick: () => downloadJournals(chosen) },
+          'Download all journal CSVs'),
+        el('button', { class: 'btn', type: 'button', disabled: !workbooks, onclick: () => downloadWorkbooks(chosen) },
+          'Download all engineer workbooks'),
+        el('button', { class: 'link-btn', type: 'button', onclick: () => { selected.clear(); refresh(); } }, 'Clear'));
+    };
+    allTick.addEventListener('change', () => {
+      if (allTick.checked) list.forEach((m) => selected.add(m.month));
+      else selected.clear();
+      refresh();
+    });
+
+    const rows = list.map(({ month, files, csv, workbooks, pick, closed }) => {
+      const tick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': `Tick ${monthInfo(month).label}`, onchange: (e) => {
+        if (e.currentTarget.checked) selected.add(month); else selected.delete(month);
+        refresh();
+      } });
+      ticks.set(month, tick);
+      return el('tr', {},
+        el('th', { scope: 'row' }, el('label', { class: 'month-pick' }, tick,
+          el('span', {}, monthInfo(month).label,
+            closed ? el('span', { class: 'chip chip-muted chip-inline' }, 'Closed') : null,
+            el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)))),
+        el('td', { class: 'download-cell' },
+          csv && el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV'),
+          workbooks.length ? el('details', { class: 'workbooks', name: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
+            el('div', { class: 'workbook-list' },
+              workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,
+              workbooks.map((f) => el('button', { class: 'link-btn', type: 'button', onclick: () => download(pick(f)) },
+              f.name.replace(/^Engineer timewriting - /, '').replace(/ - [A-Za-z]+ \d{4}\.xlsx$/, ''))))) : null),
+        el('td', { class: 'row-actions' },
+          el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showJournal(e.currentTarget.closest('tr'), month, files) }, 'View'),
+          el('button', { class: 'btn btn-sm', type: 'button', title: closed ? 'Let engineers change this month again' : 'Freeze this month once its journal is uploaded', onclick: (e) => setClosed(month, !closed, e.currentTarget) }, closed ? 'Reopen' : 'Close')));
+    });
+    table.replaceChildren(
+      el('thead', {}, el('tr', {},
+        el('th', { scope: 'col' }, el('label', { class: 'month-pick' }, allTick, el('span', {}, 'Month'))),
+        el('th', { scope: 'col' }, 'Download'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Actions')))),
+      el('tbody', {}, rows));
+    box.replaceChildren(table, bulk);
+    refresh();
   } catch (error) {
     box.replaceChildren(el('p', { class: 'form-message' }, error.message));
   }
-}
-
-function renderJournals() {
-  const box = $('#journals');
-  const list = journalMonths;
-  if (!list) return;
-  if (!list.length) {
-    box.replaceChildren(el('p', { class: 'muted' }, 'No journals yet. They appear here once engineers save their timesheets.'));
-    return;
-  }
-  const sending = Boolean(bcState.target); // signed in to Business Central
-
-  // Ticking months swaps each month's buttons for ones under the list that do all the ticked months.
-  const selected = new Set();
-  const ticks = new Map();
-  const rows = new Map();
-  const table = el('table', { class: 'sheets journals' });
-  const bulk = el('div', { class: 'bulk-bar', role: 'region', 'aria-label': 'The ticked months', hidden: true });
-  const allTick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': 'Tick every month' });
-  const refresh = () => {
-    const chosen = list.filter((m) => selected.has(m.month)).reverse(); // oldest first
-    table.classList.toggle('selecting', chosen.length > 0);
-    if (chosen.length) table.querySelectorAll('details.workbooks[open]').forEach((menu) => { menu.open = false; });
-    for (const [month, tick] of ticks) {
-      tick.checked = selected.has(month);
-      tick.closest('tr')?.classList.toggle('picked', tick.checked);
-    }
-    allTick.checked = chosen.length === list.length;
-    allTick.indeterminate = chosen.length > 0 && chosen.length < list.length;
-    bulk.hidden = !chosen.length;
-    if (!chosen.length) return;
-    const csvs = chosen.filter((m) => m.csv).length;
-    const workbooks = chosen.reduce((sum, m) => sum + m.workbooks.length, 0);
-    bulk.replaceChildren(...[ // (replaceChildren would show a null as the word "null")
-      el('span', { class: 'bulk-count' }, `${chosen.length} month${chosen.length === 1 ? '' : 's'} ticked`),
-      sending ? el('button', { class: 'btn btn-primary', type: 'button', disabled: !csvs, onclick: (e) => sendMonths(chosen, rows, e.currentTarget) },
-        'Send to Business Central') : null,
-      el('button', { class: `btn${sending ? '' : ' btn-primary'}`, type: 'button', disabled: !csvs, onclick: () => downloadJournals(chosen) },
-        'Download all journal CSVs'),
-      el('button', { class: 'btn', type: 'button', disabled: !workbooks, onclick: () => downloadWorkbooks(chosen) },
-        'Download all engineer workbooks'),
-      el('button', { class: 'link-btn', type: 'button', onclick: () => { selected.clear(); refresh(); } }, 'Clear'),
-    ].filter(Boolean));
-  };
-  allTick.addEventListener('change', () => {
-    if (allTick.checked) list.forEach((m) => selected.add(m.month));
-    else selected.clear();
-    refresh();
-  });
-
-  const body = list.map((entry) => {
-    const { month, files, csv, workbooks, pick, closed } = entry;
-    const tick = el('input', { type: 'checkbox', class: 'pick', 'aria-label': `Tick ${monthInfo(month).label}`, onchange: (e) => {
-      if (e.currentTarget.checked) selected.add(month); else selected.delete(month);
-      refresh();
-    } });
-    ticks.set(month, tick);
-    const row = el('tr', { dataset: { month } },
-      el('th', { scope: 'row' }, el('label', { class: 'month-pick' }, tick,
-        el('span', {}, monthInfo(month).label,
-          closed ? el('span', { class: 'chip chip-muted chip-inline' }, 'Closed') : null,
-          el('span', { class: 'row-note' }, `${workbooks.length} engineer${workbooks.length === 1 ? '' : 's'}`)))),
-      el('td', { class: 'download-cell' },
-        csv && (sending
-          ? el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: (e) => sendMonth(entry, e.currentTarget.closest('tr'), { button: e.currentTarget }) }, 'Send to Business Central')
-          : el('button', { class: 'btn btn-sm btn-primary', type: 'button', onclick: () => download(csv) }, 'Journal CSV')),
-        workbooks.length ? el('details', { class: 'workbooks', name: 'workbooks' }, el('summary', { class: 'btn btn-sm' }, 'Engineer workbooks'),
-          el('div', { class: 'workbook-list' },
-            workbooks.length > 1 ? el('button', { class: 'link-btn link-all', type: 'button', onclick: () => downloadAll(month, workbooks.map(pick)) }, `All (${workbooks.length}, as one .zip)`) : null,
-            workbooks.map((f) => el('button', { class: 'link-btn', type: 'button', onclick: () => download(pick(f)) },
-            f.name.replace(/^Engineer timewriting - /, '').replace(/ - [A-Za-z]+ \d{4}\.xlsx$/, ''))))) : null),
-      el('td', { class: 'row-actions' },
-        el('button', { class: 'btn btn-sm', type: 'button', onclick: (e) => showJournal(e.currentTarget.closest('tr'), month, files) }, 'View'),
-        el('button', { class: 'btn btn-sm', type: 'button', title: closed ? 'Let engineers change this month again' : 'Freeze this month once its journal is in Business Central', onclick: (e) => setClosed(month, !closed, e.currentTarget) }, closed ? 'Reopen' : 'Close')));
-    rows.set(month, row);
-    return row;
-  });
-  table.replaceChildren(
-    el('thead', {}, el('tr', {},
-      el('th', { scope: 'col' }, el('label', { class: 'month-pick' }, allTick, el('span', {}, 'Month'))),
-      el('th', { scope: 'col' }, sending ? 'Journal' : 'Download'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Actions')))),
-    el('tbody', {}, body));
-  box.replaceChildren(table, bulk);
-  refresh();
-}
-
-// --------------------------------------------------------- Business Central
-
-// The settings (in settings.json, under "businessCentral"), filled in once.
-const BC_FIELDS = [
-  ['tenant', 'Directory (tenant) ID', 'From the app registration (see How to set it up), or your organisation’s domain.', true],
-  ['clientId', 'Application (client) ID', 'From the app registration.', true],
-  ['batch', 'Journal batch', 'The Job G/L Journal batch the lines go into.', true],
-  ['capexAccount', 'G/L account for CAPEX job lines', 'The CSV’s job lines have no GL: this is where CAPEX hours go.', true],
-  ['revexAccount', 'G/L account for REVEX job lines', 'And where REVEX hours go.', true],
-  ['company', 'Company', 'Leave empty if you only have one.', false],
-  ['template', 'Journal template', 'Leave empty: it’s found from the lines in the batch.', false],
-  ['environment', 'Environment', 'Production, unless you try it in a sandbox first.', false],
-  ['service', 'Web service name', 'What page 1020 is published as.', false],
-];
-const BC_DEFAULTS = { environment: 'Production', service: 'JobGLJournal' };
-const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const BC_RULES = {
-  tenant: [(v) => GUID_RE.test(v) || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v), 'The Directory (tenant) ID looks like 1b2c3d4e-5f60-7a8b-9c0d-1e2f3a4b5c6d (or use a domain like example.co.nz).'],
-  clientId: [(v) => GUID_RE.test(v), 'The Application (client) ID looks like 1b2c3d4e-5f60-7a8b-9c0d-1e2f3a4b5c6d.'],
-  batch: [(v) => v.length <= 10, 'Journal batch names are at most 10 characters.'],
-  capexAccount: [(v) => v.length <= 20, 'G/L account numbers are at most 20 characters.'],
-  revexAccount: [(v) => v.length <= 20, 'G/L account numbers are at most 20 characters.'],
-  company: [(v) => v.length <= 30, 'Company names are at most 30 characters.'],
-  template: [(v) => v.length <= 10, 'Journal template names are at most 10 characters.'],
-  environment: [(v) => /^[A-Za-z0-9_-]{1,30}$/.test(v), 'The environment name is letters, numbers, - and _ (like Production).'],
-  service: [(v) => /^[A-Za-z0-9_]{1,240}$/.test(v), 'Web service names are letters, numbers and _.'],
-};
-const CODES = ['batch', 'template', 'capexAccount', 'revexAccount']; // Business Central keeps codes in capitals
-const bcConfig = () => ({ ...BC_DEFAULTS, ...(state.settings?.businessCentral || {}) });
-const bcConfigured = (cfg = bcConfig()) => BC_FIELDS.every(([key, , , required]) => !required || String(cfg[key] || '').trim());
-
-// Signed in to Business Central (target: what sending uses), signing in, or what went wrong.
-const bcState = { target: null, busy: false, problem: '' };
-
-function bcProblem(cfg) {
-  const missing = BC_FIELDS.filter(([key, , , required]) => required && !cfg[key]).map(([, label]) => label);
-  if (missing.length) return `Fill in ${missing.join(', ')}.`;
-  const broken = Object.entries(BC_RULES).find(([key, [ok]]) => cfg[key] && !ok(cfg[key]));
-  return broken ? broken[1][1] : '';
-}
-
-const serviceProblem = (cfg, error) => (error.status === 404
-  ? `Business Central has no web service called “${cfg.service}” in ${cfg.company}: publish page 1020 under that name (see How to set it up).`
-  : error.message);
-
-// After signing in: find the company, the batch's journal template and the G/L accounts, so
-// sending needs nothing more. Returns what sending uses.
-async function bcConnect(cfg) {
-  const all = await bc.companies(cfg);
-  const wanted = (cfg.company || '').toLowerCase();
-  const company = wanted ? all.find((c) => [c.name, c.displayName].some((n) => String(n || '').toLowerCase() === wanted))
-    : (all.length === 1 ? all[0] : null);
-  if (!company) {
-    const names = all.map((c) => `“${c.name}”`).join(', ');
-    if (wanted) throw new Error(`Business Central has no company called “${cfg.company}”${names ? ` (yours: ${names})` : ''}. Fix it in Business Central settings.`);
-    throw new Error(all.length ? `Your Business Central has ${all.length} companies (${names}): put the one to send to in Business Central settings.`
-      : 'Your Microsoft account can’t use any Business Central company.');
-  }
-  const target = { ...cfg, company: company.name, companyId: company.id };
-  try {
-    if (!target.template) {
-      target.template = await bc.findTemplate(target);
-      if (!target.template) throw new Error(`${target.batch} is empty, so its journal template can’t be found: put it in Business Central settings.`);
-      // Remember it, so it's known even once the batch is empty again.
-      saveSettings({ ...state.settings, businessCentral: { ...state.settings.businessCentral, template: target.template } },
-        { message: 'Business Central settings', wait: false }).then(renderBcSettings, () => {});
-    }
-    await bc.batchLines(target);
-  } catch (error) {
-    throw Object.assign(new Error(serviceProblem(target, error)), { signIn: error.signIn });
-  }
-  const accounts = [['CAPEX job lines', target.capexAccount], ['REVEX job lines', target.revexAccount],
-    ['balancing lines', String(state.bundle.journal?.balancingGlAccount || '')]];
-  for (const [what, number] of accounts) {
-    const account = await bc.glAccount(target, target.companyId, number);
-    if (!account) throw new Error(`Business Central has no G/L account ${number} (for ${what}). Fix it in Business Central settings.`);
-    if (account.blocked) throw new Error(`G/L account ${number} (for ${what}) is blocked in Business Central.`);
-    if (!account.directPosting) throw new Error(`G/L account ${number} (for ${what}) doesn’t allow direct posting in Business Central.`);
-  }
-  return target;
-}
-
-// "Sign in to Business Central": Microsoft's sign-in in a pop-up, then the checks above.
-function bcSignIn() {
-  const cfg = bcConfig();
-  // The pop-up opens now, while it's still the click; it's not needed if Microsoft already signed you in here.
-  const signing = bc.signedInAs(cfg) ? Promise.resolve() : bc.signIn(cfg);
-  bcState.busy = true;
-  bcState.problem = '';
-  renderBcStrip();
-  signing.then(() => bcConnect(cfg))
-    .then((target) => { bcState.target = target; }, (error) => { bcState.target = null; bcState.problem = error.message; })
-    .finally(() => { bcState.busy = false; renderBcStrip(); renderJournals(); });
-}
-
-function bcSignOut() {
-  bc.signOut();
-  bcState.target = null;
-  bcState.problem = '';
-  renderBcStrip();
-  renderJournals();
-}
-
-// Above the Journals list: the sign-in button, or who's signed in.
-function renderBcStrip() {
-  const strip = $('#bc-strip');
-  if (!strip) return;
-  const cfg = bcConfig();
-  if (!bcConfigured(cfg)) {
-    strip.replaceChildren(el('span', { class: 'muted' }, 'To send journals straight to Business Central, fill in ',
-      el('a', { href: '#bc-card' }, 'Business Central settings'), ' (once).'));
-  } else if (bcState.busy) {
-    strip.replaceChildren(el('span', { class: 'bc-line', dataset: { tone: 'busy' } },
-      el('span', { class: 'step-icon', 'aria-hidden': 'true' }), 'Signing in to Business Central…'));
-  } else if (bcState.target) {
-    const t = bcState.target;
-    strip.replaceChildren(el('span', { class: 'bc-line', dataset: { tone: 'ok' } },
-      el('span', { class: 'step-icon', 'aria-hidden': 'true' }, '✓'),
-      el('span', {}, 'Signed in to Business Central as ', el('strong', {}, bc.signedInAs(cfg)),
-        `. Journals go to ${t.batch} in ${t.company}${t.environment === 'Production' ? '' : ` (${t.environment})`}.`)),
-    el('button', { class: 'btn btn-sm', type: 'button', onclick: bcSignOut }, 'Sign out'));
-  } else {
-    strip.replaceChildren(...[
-      el('button', { class: 'btn btn-primary', type: 'button', onclick: bcSignIn }, 'Sign in to Business Central'),
-      bcState.problem && el('p', { class: 'form-message bc-problem' }, bcState.problem),
-    ].filter(Boolean));
-  }
-}
-
-// A month's journal (its CSV) as Job G/L Journal lines. Job lines go to the CAPEX or REVEX G/L
-// account with their job, task and hours; each engineer's balancing line goes to its GL
-// account. Lines are dated the month's last day, like the journal.
-function journalLines(month, csv, cfg) {
-  const [header = [], ...rows] = parseCsv(new TextDecoder().decode(csv.data)).filter((r) => r.length > 1);
-  const at = new Map(JOURNAL_HEADER.map((name) => [name, header.indexOf(name)]));
-  if ([...at.values()].some((i) => i < 0)) throw new Error('this month’s journal doesn’t have the usual columns.');
-  const [EMPLOYEE, , AMOUNT, , , GL, PROJECT, DESCRIPTION, TASK, HOURS, , DOCUMENT] = JOURNAL_HEADER;
-  const [year, number] = month.split('-').map(Number);
-  const date = new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10);
-  return rows.map((cells) => {
-    const get = (name) => String(cells[at.get(name)] ?? '').trim();
-    const employee = get(EMPLOYEE);
-    const project = get(PROJECT);
-    const task = get(TASK).toUpperCase();
-    const fields = { Posting_Date: date, Document_No: get(DOCUMENT), Description: get(DESCRIPTION), Amount: Number(get(AMOUNT)), Bal_Account_No: '' };
-    if (!project) return { group: employee, label: `${employee}, balancing line`, fields: { ...fields, Account_No: get(GL) } };
-    const account = { CAPEX: cfg.capexAccount, REVEX: cfg.revexAccount }[task];
-    if (!account) throw new Error(`${employee}, ${project}: only CAPEX and REVEX lines have a G/L account, not “${task}”.`);
-    return {
-      group: employee,
-      label: `${employee}, ${project} ${task}`,
-      fields: { ...fields, Account_No: account, Job_No: project, Job_Task_No: task, Job_Quantity: Number(get(HOURS)) },
-    };
-  });
-}
-
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-// The line under a month that says how sending it went.
-function resultRow(row) {
-  const month = row.dataset.month;
-  let tr = document.querySelector(`tr.journal-row[data-kind="send"][data-month="${month}"]`);
-  if (!tr) {
-    tr = el('tr', { class: 'journal-row', dataset: { kind: 'send', month } });
-    row.after(tr);
-  }
-  const close = () => tr.remove();
-  const set = (tone, text, ...actions) => {
-    tr.replaceChildren(el('td', { colspan: 3 }, el('div', { class: 'bc-result', dataset: { tone } },
-      el('span', { class: 'step-icon', 'aria-hidden': 'true' }, { busy: '', ok: '✓', warn: '!', error: '!' }[tone]),
-      el('span', { class: 'bc-result-text' }, text),
-      actions.length ? el('span', { class: 'bc-result-actions' }, actions) : null)));
-  };
-  return { set, close };
-}
-
-const small = (label, onclick, primary = false) => el('button', { class: `btn btn-sm${primary ? ' btn-primary' : ''}`, type: 'button', onclick }, label);
-
-// "Send to Business Central": the month's whole journal goes into the batch in one go. If
-// Business Central refuses any line, none of them is kept. It only stops to ask when the month
-// looks like it's been sent before. Returns whether it was sent.
-async function sendMonth(entry, row, { again = false, button = null, quiet = false } = {}) {
-  const result = resultRow(row);
-  const target = bcState.target;
-  if (!target) {
-    result.set('error', 'Sign in to Business Central first (the button above the list).', small('Close', result.close));
-    return false;
-  }
-  const label = monthInfo(entry.month).label;
-  let lines;
-  try {
-    lines = journalLines(entry.month, entry.csv, target);
-  } catch (error) {
-    result.set('error', `Nothing was sent: ${error.message}`, small('Close', result.close));
-    return false;
-  }
-  if (!lines.length) {
-    result.set('error', `Nothing to send: ${label}’s journal has no lines.`, small('Close', result.close));
-    return false;
-  }
-  if (button) button.disabled = true;
-  result.set('busy', `Sending ${label} to Business Central…`);
-  try {
-    if (!again) {
-      const documentNo = lines[0].fields.Document_No;
-      const waiting = await bc.batchLines(target);
-      const same = waiting.filter((l) => String(l.Document_No || '').toUpperCase() === documentNo.toUpperCase()).length;
-      const posted = same ? [] : await bc.postedEntries(target, target.companyId, documentNo);
-      if (same || posted.length) {
-        result.set('warn', same ? `${target.batch} already has ${plural(same, 'line')} for ${documentNo}, so ${label} looks like it’s been sent. Send it again?`
-          : `${documentNo} is already posted in Business Central, so ${label} looks like it’s been sent. Send it again?`,
-        small('Send again', () => sendMonth(entry, row, { again: true }), true), small('Cancel', result.close));
-        return false;
-      }
-    }
-    const { lineNos, saved } = await bc.addLines(target, lines);
-    const gst = saved.filter((line) => Number(line.bc.VAT_Amount)).length;
-    result.set('ok', `Sent ${label}: ${plural(lineNos.length, 'line')} in ${target.batch}, ready to check and post in Business Central.`
-      + (gst ? ` Business Central added GST to ${plural(gst, 'line')}, though the journal has none: check those.` : ''),
-    el('a', { class: 'btn btn-sm btn-primary', href: bc.journalLink(target), target: '_blank', rel: 'noopener noreferrer' }, 'Open in Business Central'),
-    small('Undo', () => undoSend(entry, row, lineNos)));
-    if (!quiet) fireworks();
-    return true;
-  } catch (error) {
-    if (error.signIn) {
-      bcState.target = null;
-      bcState.problem = error.message;
-      renderBcStrip();
-    }
-    result.set('error', `Nothing was sent: ${error.message}`,
-      error.signIn ? small('Close', result.close) : small('Try again', () => sendMonth(entry, row, { again }), true));
-    return false;
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-async function sendMonths(chosen, rows, button) {
-  button.disabled = true;
-  let sent = 0;
-  for (const entry of chosen.filter((m) => m.csv)) {
-    if (!bcState.target) break;
-    if (await sendMonth(entry, rows.get(entry.month), { quiet: true })) sent += 1;
-  }
-  button.disabled = false;
-  if (sent) fireworks();
-}
-
-async function undoSend(entry, row, lineNos) {
-  const result = resultRow(row);
-  const batch = bcState.target?.batch || 'the batch';
-  result.set('busy', `Taking the ${plural(lineNos.length, 'line')} back out of ${batch}…`);
-  try {
-    if (!bcState.target) throw new Error('Sign in to Business Central first (the button above the list).');
-    const removed = await bc.removeLines(bcState.target, lineNos);
-    result.set('ok', removed === lineNos.length ? `Took the ${plural(removed, 'line')} back out of ${batch}.`
-      : `Took ${removed} of the ${plural(lineNos.length, 'line')} back out of ${batch}; the rest were already gone (posted, or deleted in Business Central).`,
-    small('Close', result.close));
-  } catch (error) {
-    result.set('error', error.message, small('Try again', () => undoSend(entry, row, lineNos), true), small('Close', result.close));
-  }
-}
-
-// The settings card: open while something's missing, otherwise folded away.
-function renderBcSettings() {
-  const box = $('#bc');
-  if (!box) return;
-  const cfg = bcConfig();
-  const inputs = {};
-  const fields = BC_FIELDS.map(([key, label, hint, required]) => {
-    inputs[key] = el('input', { id: `bc-${key}`, type: 'text', value: cfg[key] || '', autocomplete: 'off', spellcheck: false });
-    return el('label', { class: 'field' }, el('span', {}, label, required ? null : el('span', { class: 'optional' }, ' (optional)')), inputs[key], el('small', {}, hint));
-  });
-  const read = () => Object.fromEntries(BC_FIELDS.map(([key]) => {
-    const value = inputs[key].value.trim();
-    return [key, CODES.includes(key) ? value.toUpperCase() : value];
-  }));
-  const status = el('p', { class: 'bc-status', role: 'status' });
-  const show = (text, tone = '') => { status.textContent = text; status.dataset.tone = tone; };
-  const save = el('button', { class: 'btn btn-primary', type: 'button' }, 'Save');
-  save.addEventListener('click', async () => {
-    const next = read();
-    const problem = bcProblem(next);
-    if (problem) { show(problem, 'error'); return; }
-    save.disabled = true;
-    show('Saving…');
-    try {
-      await saveSettings({ ...state.settings, businessCentral: Object.fromEntries(Object.entries(next).filter(([, v]) => v)) },
-        { message: 'Business Central settings', wait: false });
-      bcState.target = null; // sign in again with the new settings
-      show('Saved. Now use Sign in to Business Central, above the Journals list.', 'ok');
-      renderBcStrip();
-      renderJournals();
-    } catch (error) {
-      show(error.message, 'error');
-    } finally {
-      save.disabled = false;
-    }
-  });
-  const configured = bcConfigured(cfg);
-  box.replaceChildren(...[
-    configured && el('p', { class: 'muted bc-summary' }, `Journals go to ${cfg.batch}${cfg.company ? ` in ${cfg.company}` : ''}`
-      + `${cfg.environment === 'Production' ? '' : ` (${cfg.environment})`}: CAPEX job lines to G/L ${cfg.capexAccount}, REVEX to ${cfg.revexAccount}.`),
-    el('details', { class: 'bc-settings', open: !configured },
-      el('summary', {}, configured ? 'Change the settings' : 'Settings'),
-      el('div', { class: 'bc-grid' }, fields),
-      el('div', { class: 'bc-actions' }, save),
-      status),
-    bcSetupHelp(),
-  ].filter(Boolean));
-}
-
-function bcSetupHelp() {
-  const code = (text) => el('code', {}, text);
-  return el('details', { class: 'bc-help' }, el('summary', {}, 'How to set it up'),
-    el('p', { class: 'muted' }, 'Done once. Microsoft only lets a website sign people in once it’s registered with your organisation, and Business Central only takes journal lines from outside through a published page.'),
-    el('ol', {},
-      el('li', {}, el('strong', {}, 'Register the website with Microsoft. '),
-        'In the Microsoft Entra admin center (entra.microsoft.com): ', el('em', {}, 'App registrations › New registration'),
-        '. Name it Engineer Timewriting, choose ', el('em', {}, 'Accounts in this organizational directory only'),
-        ', and under Redirect URI pick ', el('em', {}, 'Single-page application (SPA)'), ' with ', code(bc.redirectUri()),
-        '. Register, then copy the Application (client) ID and Directory (tenant) ID into the settings above.'),
-      el('li', {}, el('strong', {}, 'Let it use Business Central. '),
-        'In the registration: ', el('em', {}, 'API permissions › Add a permission › Dynamics 365 Business Central › Delegated permissions'),
-        ', tick ', code('Financials.ReadWrite.All'), ', add it, then press ', el('em', {}, 'Grant admin consent'),
-        '. It only ever acts as the person signed in, with their Business Central permissions.'),
-      el('li', {}, el('strong', {}, 'Publish the journal page. '),
-        'In Business Central, search for ', el('em', {}, 'Web Services'), ', choose ', el('em', {}, 'New'), ': Object Type ', code('Page'),
-        ', Object ID ', code('1020'), ', Service Name ', code('JobGLJournal'), ', and tick ', el('em', {}, 'Published'), '.'),
-      el('li', {}, el('strong', {}, 'Fill in the settings above and Save. '),
-        'Then ', el('em', {}, 'Sign in to Business Central'), ' above the Journals list, and ', el('em', {}, 'Send to Business Central'),
-        ' on a month. ', el('em', {}, 'Undo'), ' takes a send back out until it’s posted.')));
 }
 
 // -------------------------------------------------------- engineers & rates
@@ -1153,7 +798,6 @@ async function start() {
     $('#jobs-card').hidden = true;
     $('#staff-card').hidden = true;
     $('#journals-card').hidden = true;
-    $('#bc-card').hidden = true;
     notice('info', 'This page is for the office. Use My timesheets to fill in your hours.');
     return;
   }
@@ -1167,7 +811,6 @@ async function start() {
     $('#report-file').disabled = true;
     $('#journals').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
     $('#staff').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
-    $('#bc').replaceChildren(el('p', { class: 'muted' }, 'Available once the admin key is set up.'));
     return;
   }
   state.repo = adminRepo(state.bundle, state.profile);
@@ -1176,11 +819,8 @@ async function start() {
   setUpWorkbookMenus();
   try {
     await loadSettings();
-    renderBcSettings();
-    renderBcStrip();
   } catch (error) {
     $('#staff').replaceChildren(el('p', { class: 'form-message' }, error.message));
-    $('#bc').replaceChildren(el('p', { class: 'form-message' }, error.message));
   }
   loadJournals();
 }

@@ -14,7 +14,7 @@ website's **Admin page** to work with them. How it's all protected is in the web
 | To… | Do this |
 | --- | --- |
 | Update the job list | On the website's **Admin** page, drop the **Job Task Overview** export from Business Central into the upload box. It's encrypted in the browser and saved here as `input/report.json`, and the page shows when the website has the new list (about a minute). Don't upload spreadsheets to GitHub directly: they'd be readable, and the Actions ignore them. |
-| Put the journal into Business Central | On the **Admin** page, press **Sign in to Business Central** (above the Journals list), then **Send to Business Central** on the month. Its lines go into the Job G/L Journal batch, ready to check and post there; **Undo** takes them back out until they're posted. To send several months, tick them and use **Send to Business Central** under the list. It's set up once under **Business Central settings** on the Admin page (see the website repo's README). To download the CSV instead, tick the month and press **Download all journal CSVs**. |
+| Get the journal for Business Central | On the **Admin** page, under **Journals**, download the month's **Journal CSV** (or **View** it first). To get several months at once, tick them and press **Download all journal CSVs** (or **Download all engineer workbooks**). |
 | See one engineer's month | On the **Admin** page, under **Engineer workbooks**: laid out like the old "Timewriting 1-For Engineer" sheet. |
 | Check for problems | **View** a month on the **Admin** page: it lists hours on jobs that aren't open, days over 24 hours and missing rates. |
 | Let someone use the Admin page | Add them to `admins` in `settings.json` (see *Changing files by hand* below). They get a password like everyone else. Someone in both lists gets both pages. |
@@ -73,12 +73,11 @@ git commit -am "Update settings" && git push && rm /tmp/settings.json
 | Setting | Meaning |
 | --- | --- |
 | `employees` | Engineers who fill in timesheets: `name` (as it should appear in the journal), `rechargeRate` (each engineer has their own; there's no default), optional `username` (default `firstname.lastname`), optional `email` (where password-reset links go), and `"active": false` for people who have left. They can't sign in, but their past journals keep their rate. |
-| `closedMonths` | Months whose journals are in Business Central, like `"2026-09"`. Their files are frozen: engineers can't change those months, and later rate changes don't affect them. |
+| `closedMonths` | Months whose journals have been uploaded to Business Central, like `"2026-09"`. Their files are frozen: engineers can't change those months, and later rate changes don't affect them. |
 | `admins` | People who can use the Admin page (upload the report, download journals): `name`, optional `username`, optional `email`. |
 | `otherTime` | The non-job rows engineers can add, like General Time and the leave types. They go in the engineer workbooks, not the journal. |
 | `jobStatuses` | Which job task statuses appear on the website. |
 | `journal.balancingGlAccount` | GL account for each engineer's balancing line. |
-| `businessCentral` | Where **Send to Business Central** puts journals: `tenant`, `clientId`, `environment`, `company`, `batch`, `template`, `service` (the web service name), `capexAccount` and `revexAccount` (G/L accounts for job lines). Set it on the Admin page, under **Business Central settings**. |
 | `journal.monthLabels` | Month names used in Description and Document number (`Sept`, …). |
 | `journal.description`, `journal.documentNumber` | Templates. `{employee}`, `{monthLabel}`, `{yy}`, `{yyyy}`, `{mon}` and `{month}` are filled in. |
 | `journal.dateFormat` | Date format in the CSV (`%d/%m/%Y` gives 30/09/2026). |
